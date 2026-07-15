@@ -1,0 +1,179 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Identity ───────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  role         Role
+  createdAt    DateTime @default(now())
+
+  candidateProfile   CandidateProfile?
+  jobInterviewers    JobInterviewer[]
+  interviews         Interview[]
+  interviewFeedbacks InterviewFeedback[]
+}
+
+model CandidateProfile {
+  id            String   @id @default(uuid())
+  userId        String   @unique
+  resumeUrl     String?
+  educationJson Json
+  experienceMin Int
+  updatedAt     DateTime @updatedAt
+
+  user            User             @relation(fields: [userId], references: [id])
+  candidateSkills CandidateSkill[]
+  applications    Application[]
+}
+
+model CandidateSkill {
+  candidateProfileId String
+  skillId             String
+
+  candidateProfile CandidateProfile @relation(fields: [candidateProfileId], references: [id])
+  skill            Skill            @relation(fields: [skillId], references: [id])
+
+  @@id([candidateProfileId, skillId])
+}
+
+model Skill {
+  id   String @id @default(uuid())
+  name String @unique
+
+  candidateSkills CandidateSkill[]
+  jobSkills       JobSkill[]
+}
+
+// ─── Jobs / Config ──────────────────────────────────────────
+
+model Job {
+  id            String    @id @default(uuid())
+  title         String
+  description   String    @db.Text
+  experienceMin Int
+  salaryMax     Int?
+  deadline      DateTime
+  status        JobStatus
+
+  jobInterviewers JobInterviewer[]
+  jobSkills       JobSkill[]
+  applications    Application[]
+}
+
+model JobSkill {
+  jobId   String
+  skillId String
+
+  job   Job   @relation(fields: [jobId], references: [id])
+  skill Skill @relation(fields: [skillId], references: [id])
+
+  @@id([jobId, skillId])
+}
+
+model JobInterviewer {
+  jobId         String
+  interviewerId String
+
+  job         Job  @relation(fields: [jobId], references: [id])
+  interviewer User @relation(fields: [interviewerId], references: [id])
+
+  @@id([jobId, interviewerId])
+}
+
+// ─── Pipelines ──────────────────────────────────────────────
+
+model Application {
+  id                 String    @id @default(uuid())
+  candidateProfileId String
+  jobId              String
+  status             AppStatus
+  skillMatchPct      Decimal   @db.Decimal(5, 2)
+  compositeScore     Decimal   @db.Decimal(5, 2)
+
+  candidateProfile CandidateProfile @relation(fields: [candidateProfileId], references: [id])
+  job              Job              @relation(fields: [jobId], references: [id])
+  interviews       Interview[]
+}
+
+model Interview {
+  id            String    @id @default(uuid())
+  applicationId String
+  interviewerId String
+  scheduledTime DateTime
+  status        IntStatus
+
+  application          Application           @relation(fields: [applicationId], references: [id])
+  interviewer          User                  @relation(fields: [interviewerId], references: [id])
+  aiGeneratedQuestions AIGeneratedQuestion[]
+  interviewFeedback    InterviewFeedback?
+}
+
+// ─── AI Evaluation ──────────────────────────────────────────
+
+model AIGeneratedQuestion {
+  id           String @id @default(uuid())
+  interviewId  String
+  questionText String @db.Text
+  expectedCore String @db.Text
+
+  interview Interview @relation(fields: [interviewId], references: [id])
+}
+
+model InterviewFeedback {
+  id               String @id @default(uuid())
+  interviewId      String @unique
+  interviewerId    String
+  scoreComm        Int
+  scoreTech        Int
+  scoreProblemSolv Int
+  scoreCulture     Int
+  comments         String @db.Text
+
+  interview   Interview @relation(fields: [interviewId], references: [id])
+  interviewer User      @relation(fields: [interviewerId], references: [id])
+}
+
+// ─── Enums ──────────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  RECRUITER
+  INTERVIEWER
+  CANDIDATE
+}
+
+enum JobStatus {
+  DRAFT
+  OPEN
+  CLOSED
+  ARCHIVED
+}
+
+enum AppStatus {
+  APPLIED
+  SCREENING
+  INTERVIEW
+  OFFERED
+  REJECTED
+  HIRED
+  WITHDRAWN
+}
+
+enum IntStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+  RESCHEDULED
+  NO_SHOW
+}
