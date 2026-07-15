@@ -32,17 +32,17 @@ model CandidateProfile {
   experienceMin Int
   updatedAt     DateTime @updatedAt
 
-  user            User             @relation(fields: [userId], references: [id])
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   candidateSkills CandidateSkill[]
   applications    Application[]
 }
 
 model CandidateSkill {
   candidateProfileId String
-  skillId             String
+  skillId            String
 
-  candidateProfile CandidateProfile @relation(fields: [candidateProfileId], references: [id])
-  skill            Skill            @relation(fields: [skillId], references: [id])
+  candidateProfile CandidateProfile @relation(fields: [candidateProfileId], references: [id], onDelete: Cascade)
+  skill            Skill            @relation(fields: [skillId], references: [id], onDelete: Cascade)
 
   @@id([candidateProfileId, skillId])
 }
@@ -75,8 +75,8 @@ model JobSkill {
   jobId   String
   skillId String
 
-  job   Job   @relation(fields: [jobId], references: [id])
-  skill Skill @relation(fields: [skillId], references: [id])
+  job   Job   @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  skill Skill @relation(fields: [skillId], references: [id], onDelete: Cascade)
 
   @@id([jobId, skillId])
 }
@@ -85,7 +85,7 @@ model JobInterviewer {
   jobId         String
   interviewerId String
 
-  job         Job  @relation(fields: [jobId], references: [id])
+  job         Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
   interviewer User @relation(fields: [interviewerId], references: [id])
 
   @@id([jobId, interviewerId])
@@ -101,8 +101,8 @@ model Application {
   skillMatchPct      Decimal   @db.Decimal(5, 2)
   compositeScore     Decimal   @db.Decimal(5, 2)
 
-  candidateProfile CandidateProfile @relation(fields: [candidateProfileId], references: [id])
-  job              Job              @relation(fields: [jobId], references: [id])
+  candidateProfile CandidateProfile @relation(fields: [candidateProfileId], references: [id], onDelete: Cascade)
+  job              Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
   interviews       Interview[]
 }
 
@@ -113,7 +113,7 @@ model Interview {
   scheduledTime DateTime
   status        IntStatus
 
-  application          Application           @relation(fields: [applicationId], references: [id])
+  application          Application           @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   interviewer          User                  @relation(fields: [interviewerId], references: [id])
   aiGeneratedQuestions AIGeneratedQuestion[]
   interviewFeedback    InterviewFeedback?
@@ -122,12 +122,15 @@ model Interview {
 // ─── AI Evaluation ──────────────────────────────────────────
 
 model AIGeneratedQuestion {
-  id           String @id @default(uuid())
-  interviewId  String
-  questionText String @db.Text
-  expectedCore String @db.Text
+  id                String  @id @default(uuid())
+  interviewId       String
+  questionText      String  @db.Text
+  questionAudioUrl  String?
+  answerText        String? @db.Text
+  candidateAudioUrl String?
+  expectedCore      String  @db.Text
 
-  interview Interview @relation(fields: [interviewId], references: [id])
+  interview Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
 }
 
 model InterviewFeedback {
@@ -140,7 +143,7 @@ model InterviewFeedback {
   scoreCulture     Int
   comments         String @db.Text
 
-  interview   Interview @relation(fields: [interviewId], references: [id])
+  interview   Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
   interviewer User      @relation(fields: [interviewerId], references: [id])
 }
 
