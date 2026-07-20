@@ -2,6 +2,7 @@ generator client {
   provider        = "prisma-client"
   output          = "../src/generated/prisma"
   previewFeatures = ["postgresqlExtensions"]
+  moduleFormat    = "cjs"
 }
 
 datasource db {
@@ -39,7 +40,7 @@ model CandidateProfile {
   extractedDataJson Json?
   educationJson     Json
   experienceYears   Int
-  resumeEmbedding   Unsupported("vector(1536)")?
+  resumeEmbedding   Unsupported("vector(384)")?
   updatedAt         DateTime                     @updatedAt
   createdAt         DateTime                     @default(now())
 
@@ -76,7 +77,7 @@ model KnowledgeDocument {
   title      String
   sourceType KnowledgeSourceType
   content    String                       @db.Text
-  embedding  Unsupported("vector(1536)")?
+  embedding  Unsupported("vector(384)")?
   createdAt  DateTime                     @default(now())
   updatedAt  DateTime                     @updatedAt
 
@@ -94,7 +95,7 @@ model Job {
   rawPrompt            String                       @db.Text
   generatedDescription String                       @db.Text
   description          String                       @db.Text
-  embedding            Unsupported("vector(1536)")?
+  embedding            Unsupported("vector(384)")?
 
   experienceMin Int
   salaryMax     Int?
