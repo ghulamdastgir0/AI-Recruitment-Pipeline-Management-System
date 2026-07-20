@@ -1,13 +1,18 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
+  provider   = "postgresql"
+  extensions = [vector]
 }
 
 // ─── Identity ───────────────────────────────────────────────
+// SRS v2.1: only two active roles remain — Admin/HR runs the pipeline,
+// Candidate moves through it. RECRUITER/INTERVIEWER are gone because
+// interviewing is now fully automated (see AIInterviewSession).
 
 model User {
   id           String   @id @default(uuid())
@@ -18,19 +23,25 @@ model User {
   role         Role
   createdAt    DateTime @default(now())
 
-  candidateProfile   CandidateProfile?
-  jobInterviewers    JobInterviewer[]
-  interviews         Interview[]
-  interviewFeedbacks InterviewFeedback[]
+  candidateProfile CandidateProfile?
+  jobsCreated      Job[]             @relation("JobCreatedBy")
+  emailsTriggered  EmailLog[]        @relation("EmailTriggeredBy")
 }
 
 model CandidateProfile {
-  id            String   @id @default(uuid())
-  userId        String   @unique
-  resumeUrl     String?
-  educationJson Json
-  experienceMin Int
-  updatedAt     DateTime @updatedAt
+  id                String                       @id @default(uuid())
+  userId            String                       @unique
+  resumeUrl         String
+  resumeText        String?                      @db.Text
+  // Raw LLM Schema Extractor output (FR-RES-01): name/email/skills/experience
+  // as parsed from the uploaded document, kept for audit independent of the
+  // user-entered profile fields above.
+  extractedDataJson Json?
+  educationJson     Json
+  experienceYears   Int
+  resumeEmbedding   Unsupported("vector(1536)")?
+  updatedAt         DateTime                     @updatedAt
+  createdAt         DateTime                     @default(now())
 
   user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   candidateSkills CandidateSkill[]
@@ -51,24 +62,60 @@ model Skill {
   id   String @id @default(uuid())
   name String @unique
 
-  candidateSkills CandidateSkill[]
-  jobSkills       JobSkill[]
+  candidateSkills      CandidateSkill[]
+  jobSkills            JobSkill[]
+  candidateSkillGrades CandidateSkillGrade[]
+}
+
+// ─── RAG Knowledge Base ─────────────────────────────────────
+// FR-JOB-01: internal wiki/stack/culture documents embedded via pgvector
+// so the JD generator can retrieve company-specific context for a raw prompt.
+
+model KnowledgeDocument {
+  id         String                       @id @default(uuid())
+  title      String
+  sourceType KnowledgeSourceType
+  content    String                       @db.Text
+  embedding  Unsupported("vector(1536)")?
+  createdAt  DateTime                     @default(now())
+  updatedAt  DateTime                     @updatedAt
+
+  @@index([sourceType])
 }
 
 // ─── Jobs / Config ──────────────────────────────────────────
 
 model Job {
-  id            String    @id @default(uuid())
-  title         String
-  description   String    @db.Text
+  id    String @id @default(uuid())
+  title String
+
+  // FR-JOB-01/02: the HR one-line prompt, the raw RAG/LLM output, and the
+  // final (possibly HR-edited) description that actually gets published.
+  rawPrompt            String                       @db.Text
+  generatedDescription String                       @db.Text
+  description          String                       @db.Text
+  embedding            Unsupported("vector(1536)")?
+
   experienceMin Int
   salaryMax     Int?
   deadline      DateTime
-  status        JobStatus
+  status        JobStatus @default(DRAFT)
 
-  jobInterviewers JobInterviewer[]
-  jobSkills       JobSkill[]
-  applications    Application[]
+  // FR-HR-03: hiring quota / "Hired" cap driving autonomic closure.
+  hiringTarget        Int
+  hiredCount          Int       @default(0)
+  portalPublishedAt   DateTime?
+  portalUnpublishedAt DateTime?
+
+  createdByUserId String
+  createdAt       DateTime @default(now())
+
+  createdBy    User          @relation("JobCreatedBy", fields: [createdByUserId], references: [id])
+  jobSkills    JobSkill[]
+  applications Application[]
+  linkedInPost LinkedInPost?
+
+  @@index([status])
 }
 
 model JobSkill {
@@ -81,14 +128,19 @@ model JobSkill {
   @@id([jobId, skillId])
 }
 
-model JobInterviewer {
-  jobId         String
-  interviewerId String
+// FR-JOB-03 & FR-HR-03: LinkedIn Share/Publish API tracking, including the
+// tracking URL embedded in the post and its removal once the job closes.
 
-  job         Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  interviewer User @relation(fields: [interviewerId], references: [id])
+model LinkedInPost {
+  id             String    @id @default(uuid())
+  jobId          String    @unique
+  linkedInPostId String    @unique
+  postUrl        String
+  trackingUrl    String
+  postedAt       DateTime  @default(now())
+  removedAt      DateTime?
 
-  @@id([jobId, interviewerId])
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
 }
 
 // ─── Pipelines ──────────────────────────────────────────────
@@ -97,68 +149,122 @@ model Application {
   id                 String    @id @default(uuid())
   candidateProfileId String
   jobId              String
-  status             AppStatus
-  skillMatchPct      Decimal   @db.Decimal(5, 2)
-  compositeScore     Decimal   @db.Decimal(5, 2)
+  status             AppStatus @default(APPLIED)
 
-  candidateProfile CandidateProfile @relation(fields: [candidateProfileId], references: [id], onDelete: Cascade)
-  job              Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  interviews       Interview[]
+  // FR-RES-02: hard-gate semantic match score (>=80 advances).
+  skillMatchPct Decimal   @db.Decimal(5, 2)
+  screenedAt    DateTime?
+
+  // FR-INT-01: 48-hour window to complete the automated interview, opened
+  // the moment the candidate clears the hard gate.
+  interviewWindowOpensAt   DateTime?
+  interviewWindowExpiresAt DateTime?
+
+  // Overall composite score (match % + interview performance) shown on the
+  // HR scoreboard (FR-HR-01).
+  compositeScore Decimal? @db.Decimal(5, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  candidateProfile CandidateProfile    @relation(fields: [candidateProfileId], references: [id], onDelete: Cascade)
+  job              Job                 @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  interviewSession AIInterviewSession?
+  emailLogs        EmailLog[]
+
+  @@index([jobId, status])
 }
 
-model Interview {
+// ─── Automated AI Interview & Evaluation Engine ──────────────
+// Replaces the old human-scheduled Interview/JobInterviewer/InterviewFeedback
+// trio: FR-INT-02 runs a synchronous, AI-conducted session with no human
+// interviewer in the loop.
+
+model AIInterviewSession {
   id            String    @id @default(uuid())
-  applicationId String
-  interviewerId String
-  scheduledTime DateTime
-  status        IntStatus
+  applicationId String    @unique
+  status        IntStatus @default(PENDING)
 
-  application          Application           @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  interviewer          User                  @relation(fields: [interviewerId], references: [id])
-  aiGeneratedQuestions AIGeneratedQuestion[]
-  interviewFeedback    InterviewFeedback?
+  windowExpiresAt DateTime
+  startedAt       DateTime?
+  completedAt     DateTime?
+
+  // Aggregate score derived from the skill matrix below.
+  overallScore Decimal? @db.Decimal(5, 2)
+
+  application Application           @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  questions   AIInterviewQuestion[]
+  skillGrades CandidateSkillGrade[]
 }
 
-// ─── AI Evaluation ──────────────────────────────────────────
-
-model AIGeneratedQuestion {
-  id                String  @id @default(uuid())
-  interviewId       String
-  questionText      String  @db.Text
+model AIInterviewQuestion {
+  id                String    @id @default(uuid())
+  sessionId         String
+  sequenceOrder     Int
+  questionText      String    @db.Text
   questionAudioUrl  String?
-  answerText        String? @db.Text
+  answerText        String?   @db.Text
   candidateAudioUrl String?
-  expectedCore      String  @db.Text
+  expectedCore      String    @db.Text
+  askedAt           DateTime?
+  answeredAt        DateTime?
 
-  interview Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  session AIInterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, sequenceOrder])
 }
 
-model InterviewFeedback {
-  id               String @id @default(uuid())
-  interviewId      String @unique
-  interviewerId    String
-  scoreComm        Int
-  scoreTech        Int
-  scoreProblemSolv Int
-  scoreCulture     Int
-  comments         String @db.Text
+// FR-INT-03: per-skill proficiency score plus a mandatory textual
+// justification, replacing the old fixed comm/tech/problem-solving columns.
 
-  interview   Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
-  interviewer User      @relation(fields: [interviewerId], references: [id])
+model CandidateSkillGrade {
+  id               String @id @default(uuid())
+  sessionId        String
+  skillId          String
+  proficiencyScore Int
+  justification    String @db.Text
+
+  session AIInterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  skill   Skill              @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, skillId])
+}
+
+// ─── Automated Communications ────────────────────────────────
+// Audit trail for every system/HR-triggered email: screening rejection,
+// interview acknowledgment (FR-INT-04), and the three HR action-button
+// variants plus smart-closure bulk rejections (FR-HR-02/03).
+
+model EmailLog {
+  id                String    @id @default(uuid())
+  applicationId     String
+  type              EmailType
+  sentAt            DateTime  @default(now())
+  triggeredByUserId String?
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  triggeredBy User?       @relation("EmailTriggeredBy", fields: [triggeredByUserId], references: [id])
+
+  @@index([applicationId])
 }
 
 // ─── Enums ──────────────────────────────────────────────────
 
 enum Role {
   ADMIN
-  RECRUITER
-  INTERVIEWER
   CANDIDATE
+}
+
+enum KnowledgeSourceType {
+  WIKI
+  STACK_PREFERENCE
+  CULTURE_GUIDELINE
+  OTHER
 }
 
 enum JobStatus {
   DRAFT
-  OPEN
+  PUBLISHED
   CLOSED
   ARCHIVED
 }
@@ -166,17 +272,30 @@ enum JobStatus {
 enum AppStatus {
   APPLIED
   SCREENING
-  INTERVIEW
-  OFFERED
+  SCREENING_REJECTED
+  INTERVIEW_PENDING
+  INTERVIEW_EXPIRED
+  IN_REVIEW
+  SELECTED
+  NEXT_ROUND
   REJECTED
   HIRED
   WITHDRAWN
 }
 
 enum IntStatus {
-  SCHEDULED
+  PENDING
+  IN_PROGRESS
   COMPLETED
+  EXPIRED
   CANCELLED
-  RESCHEDULED
-  NO_SHOW
+}
+
+enum EmailType {
+  SCREENING_REJECTION
+  INTERVIEW_ACKNOWLEDGEMENT
+  SELECTION
+  NEXT_ROUND
+  REJECTION
+  BULK_REJECTION
 }
