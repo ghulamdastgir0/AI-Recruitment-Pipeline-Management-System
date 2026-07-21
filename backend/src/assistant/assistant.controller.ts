@@ -44,7 +44,7 @@ const optionalPdfValidationPipe = new ParseFilePipeBuilder()
 @ApiTags('assistant')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN')
+@Roles('SUPER_ADMIN', 'HR_ADMIN')
 @Controller('assistant')
 export class AssistantController {
   constructor(private readonly orchestrator: AssistantOrchestratorService) {}

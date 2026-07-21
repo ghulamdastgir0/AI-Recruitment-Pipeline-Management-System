@@ -11,7 +11,8 @@ describe('AuthService', () => {
     passwordHash: bcrypt.hashSync('correct-password', 4),
     firstName: 'HR',
     lastName: 'Admin',
-    role: 'ADMIN' as const,
+    role: 'SUPER_ADMIN' as const,
+    isActive: true,
   };
 
   function buildService() {
@@ -36,12 +37,12 @@ describe('AuthService', () => {
       email: 'hr@example.com',
       firstName: 'HR',
       lastName: 'Admin',
-      role: 'ADMIN',
+      role: 'SUPER_ADMIN',
     });
     expect(jwt.signAsync).toHaveBeenCalledWith({
       sub: 'user-1',
       email: 'hr@example.com',
-      role: 'ADMIN',
+      role: 'SUPER_ADMIN',
     });
   });
 
@@ -60,6 +61,18 @@ describe('AuthService', () => {
 
     await expect(
       service.login('hr@example.com', 'wrong-password'),
+    ).rejects.toThrow('Invalid email or password.');
+  });
+
+  it('rejects a deactivated user with the same message as bad credentials', async () => {
+    const { service, prisma } = buildService();
+    (prisma.user.findUnique as jest.Mock).mockResolvedValue({
+      ...user,
+      isActive: false,
+    });
+
+    await expect(
+      service.login('hr@example.com', 'correct-password'),
     ).rejects.toThrow('Invalid email or password.');
   });
 });

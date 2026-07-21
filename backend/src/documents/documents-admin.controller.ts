@@ -66,7 +66,7 @@ function toResponseDto(document: {
 @ApiTags('admin-documents')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN')
+@Roles('SUPER_ADMIN')
 @Controller('admin/documents')
 export class DocumentsAdminController {
   constructor(
@@ -169,8 +169,9 @@ export class DocumentsAdminController {
   async setStatus(
     @Param('id') id: string,
     @Body() body: UpdateDocumentStatusDto,
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<DocumentResponseDto> {
-    const document = await this.documents.setStatus(id, body.status);
+    const document = await this.documents.setStatus(id, body.status, user.id);
     return toResponseDto(document);
   }
 }

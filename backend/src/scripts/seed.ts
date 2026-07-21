@@ -4,10 +4,12 @@ import { PrismaService } from '../prisma/prisma.service';
 
 const SALT_ROUNDS = 12;
 
-// Idempotent: creates exactly one ADMIN account from env vars if no user
-// with that email exists yet. This is an operator-provided real account
-// (not fabricated business data), the only way to bootstrap the first HR
-// login now that document/job/CV endpoints require real JWT auth.
+// Idempotent: creates exactly one SUPER_ADMIN account from env vars if no
+// user with that email exists yet. This is an operator-provided real
+// account (not fabricated business data), the only way to bootstrap the
+// first login now that document/job/CV endpoints require real JWT auth —
+// SUPER_ADMIN is the only role this script can create; HR_ADMIN/HIRING_MANAGER
+// accounts are created afterward via POST /admin/users.
 //
 // Lives under src/ (not prisma/) so `nest build` compiles it alongside the
 // generated Prisma client — running it via ts-node directly against the
@@ -39,7 +41,7 @@ async function main() {
 
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
     const user = await prisma.user.create({
-      data: { email, passwordHash, firstName, lastName, role: 'ADMIN' },
+      data: { email, passwordHash, firstName, lastName, role: 'SUPER_ADMIN' },
     });
     console.log(`Created admin user "${user.email}" (id: ${user.id}).`);
   } finally {

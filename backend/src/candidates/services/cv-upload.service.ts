@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { AuditLogService } from '../../audit/audit-log.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BackgroundJobQueueService } from '../../shared/background-jobs/background-job-queue.service';
 import { CvProcessorService } from './cv-processor.service';
@@ -35,6 +36,7 @@ export class CvUploadService {
     private readonly storage: CvStorageService,
     private readonly jobQueue: BackgroundJobQueueService,
     private readonly processor: CvProcessorService,
+    private readonly audit: AuditLogService,
   ) {}
 
   /**
@@ -46,6 +48,7 @@ export class CvUploadService {
   async uploadCv(
     jobPostingId: string,
     file: UploadedCv,
+    uploadedByUserId: string,
   ): Promise<UploadCvResult> {
     this.assertIsPdf(file);
 
@@ -94,6 +97,14 @@ export class CvUploadService {
         jobId: jobPostingId,
         status: 'APPLIED',
       },
+    });
+
+    await this.audit.record({
+      actorUserId: uploadedByUserId,
+      action: 'candidate_cv.uploaded',
+      resourceType: 'CandidateProfile',
+      resourceId: profile.id,
+      details: { jobPostingId, applicationId: application.id },
     });
 
     return {

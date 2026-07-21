@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { AuditLogService } from '../audit/audit-log.service';
 import type { ExtractedCvProfileDto } from '../candidates/dto/extracted-cv-profile.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmbeddingsService } from '../shared/embeddings/embeddings.service';
@@ -36,11 +37,13 @@ export class MatchingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly embeddings: EmbeddingsService,
+    private readonly audit: AuditLogService,
   ) {}
 
   async match(
     candidateProfileId: string,
     jobPostingId: string,
+    actorUserId: string,
   ): Promise<MatchOutcome> {
     const [job, candidate] = await Promise.all([
       this.loadJob(jobPostingId),
@@ -110,6 +113,18 @@ export class MatchingService {
     await this.prisma.application.update({
       where: { id: application.id },
       data: { skillMatchPct: computation.overallScore, screenedAt: new Date() },
+    });
+
+    await this.audit.record({
+      actorUserId,
+      action: 'candidate_score.generated',
+      resourceType: 'MatchResult',
+      resourceId: matchResult.id,
+      details: {
+        candidateProfileId,
+        jobPostingId,
+        overallScore: computation.overallScore,
+      },
     });
 
     return {

@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { AuditLogService } from '../../audit/audit-log.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Document } from '../../generated/prisma/client';
 import { DocumentStatus } from '../../generated/prisma/enums';
@@ -26,6 +27,7 @@ export class DocumentService {
     private readonly storage: FileStorageService,
     private readonly jobQueue: BackgroundJobQueueService,
     private readonly processor: DocumentProcessorService,
+    private readonly audit: AuditLogService,
   ) {}
 
   /** Uploads the first version of a brand-new document name. */
@@ -43,7 +45,17 @@ export class DocumentService {
       );
     }
 
-    return this.createVersion(name, file, 1, uploadedByUserId);
+    const document = await this.createVersion(name, file, 1, uploadedByUserId);
+    if (uploadedByUserId) {
+      await this.audit.record({
+        actorUserId: uploadedByUserId,
+        action: 'document.uploaded',
+        resourceType: 'Document',
+        resourceId: document.id,
+        details: { name, version: document.version },
+      });
+    }
+    return document;
   }
 
   /** Uploads a newer version superseding the document family that `existingDocumentId` belongs to. */
@@ -69,12 +81,22 @@ export class DocumentService {
     });
     const nextVersion = (latest?.version ?? 0) + 1;
 
-    return this.createVersion(
+    const document = await this.createVersion(
       existing.name,
       file,
       nextVersion,
       uploadedByUserId,
     );
+    if (uploadedByUserId) {
+      await this.audit.record({
+        actorUserId: uploadedByUserId,
+        action: 'document.version_added',
+        resourceType: 'Document',
+        resourceId: document.id,
+        details: { name: existing.name, version: document.version },
+      });
+    }
+    return document;
   }
 
   async list(filter: {
@@ -102,6 +124,7 @@ export class DocumentService {
   async setStatus(
     id: string,
     status: 'ACTIVE' | 'INACTIVE',
+    actorUserId: string,
   ): Promise<Document> {
     const document = await this.getById(id);
 
@@ -128,6 +151,14 @@ export class DocumentService {
         data: { status: 'INACTIVE' },
       });
     }
+
+    await this.audit.record({
+      actorUserId,
+      action: 'document.status_changed',
+      resourceType: 'Document',
+      resourceId: id,
+      details: { name: document.name, status },
+    });
 
     return this.getById(id);
   }

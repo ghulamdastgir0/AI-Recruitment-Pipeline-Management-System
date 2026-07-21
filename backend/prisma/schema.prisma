@@ -11,9 +11,12 @@ datasource db {
 }
 
 // ─── Identity ───────────────────────────────────────────────
-// SRS v2.1: only two active roles remain — Admin/HR runs the pipeline,
-// Candidate moves through it. RECRUITER/INTERVIEWER are gone because
-// interviewing is now fully automated (see AIInterviewSession).
+// Three staff roles (see Role enum): SUPER_ADMIN runs the company/users/RAG
+// docs, HR_ADMIN runs day-to-day recruiting through the assistant,
+// HIRING_MANAGER is read+comment-only, scoped to assigned job postings via
+// JobPostingHiringManager. RECRUITER/INTERVIEWER/CANDIDATE are gone —
+// interviewing is fully automated (see AIInterviewSession) and no
+// self-service candidate portal/login has ever been built.
 
 model User {
   id           String   @id @default(uuid())
@@ -22,15 +25,22 @@ model User {
   firstName    String
   lastName     String
   role         Role
+  // Deactivate/"remove" toggle — enforced on every authenticated request
+  // (JwtAuthGuard), not just at login, so revoking access doesn't wait out
+  // the JWT's expiry window.
+  isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
 
-  candidateProfile  CandidateProfile?
-  jobsCreated       Job[]                    @relation("JobCreatedBy")
-  emailsTriggered   EmailLog[]               @relation("EmailTriggeredBy")
-  documentsUploaded Document[]               @relation("DocumentUploadedBy")
-  auditLogs         AuditLog[]
-  actionsRequested  PendingAssistantAction[] @relation("PendingActionRequestedBy")
-  actionsConfirmed  PendingAssistantAction[] @relation("PendingActionConfirmedBy")
+  candidateProfile        CandidateProfile?
+  jobsCreated              Job[]                     @relation("JobCreatedBy")
+  emailsTriggered          EmailLog[]                @relation("EmailTriggeredBy")
+  documentsUploaded        Document[]                @relation("DocumentUploadedBy")
+  auditLogs                AuditLog[]
+  actionsRequested         PendingAssistantAction[]  @relation("PendingActionRequestedBy")
+  actionsConfirmed         PendingAssistantAction[]  @relation("PendingActionConfirmedBy")
+  hiringManagerAssignments JobPostingHiringManager[] @relation("HiringManagerAssignments")
+  assignmentsGiven         JobPostingHiringManager[] @relation("HiringManagerAssignedBy")
+  candidateComments        CandidateComment[]
 }
 
 model CandidateProfile {
@@ -68,9 +78,10 @@ model CandidateProfile {
   updatedAt DateTime @updatedAt
   createdAt DateTime @default(now())
 
-  user            User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user            User?              @relation(fields: [userId], references: [id], onDelete: Cascade)
   candidateSkills CandidateSkill[]
   applications    Application[]
+  comments        CandidateComment[]
 
   @@index([resumeContentHash])
 }
@@ -172,10 +183,12 @@ model Job {
   createdByUserId String
   createdAt       DateTime @default(now())
 
-  createdBy    User          @relation("JobCreatedBy", fields: [createdByUserId], references: [id])
-  jobSkills    JobSkill[]
-  applications Application[]
-  linkedInPost LinkedInPost?
+  createdBy      User                      @relation("JobCreatedBy", fields: [createdByUserId], references: [id])
+  jobSkills      JobSkill[]
+  applications   Application[]
+  linkedInPost   LinkedInPost?
+  hiringManagers JobPostingHiringManager[]
+  comments       CandidateComment[]
 
   @@index([status])
 }
@@ -204,6 +217,48 @@ model LinkedInPost {
   removedAt      DateTime?
 
   job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+}
+
+// Hiring Managers only see/comment on job postings they've been explicitly
+// assigned to (RBAC requirement 6) — enforced by JobAssignmentGuard, backed
+// by this table rather than any tenant/company concept (single-company
+// deployment).
+
+model JobPostingHiringManager {
+  id                  String   @id @default(uuid())
+  jobId               String
+  hiringManagerUserId String
+  assignedByUserId    String
+  assignedAt          DateTime @default(now())
+
+  job           Job  @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  hiringManager User @relation("HiringManagerAssignments", fields: [hiringManagerUserId], references: [id], onDelete: Cascade)
+  assignedBy    User @relation("HiringManagerAssignedBy", fields: [assignedByUserId], references: [id])
+
+  @@unique([jobId, hiringManagerUserId])
+  @@index([hiringManagerUserId])
+}
+
+// Hiring Manager feedback on a candidate, scoped to one job posting (a
+// candidate can be evaluated — and commented on — separately per posting,
+// same scoping as Application/MatchResult). Groundwork for the future
+// interview module, not implemented yet.
+
+model CandidateComment {
+  id            String   @id @default(uuid())
+  candidateId   String
+  jobPostingId  String
+  authorUserId  String
+  content       String   @db.Text
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  candidate  CandidateProfile @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  jobPosting Job              @relation(fields: [jobPostingId], references: [id], onDelete: Cascade)
+  author     User             @relation(fields: [authorUserId], references: [id])
+
+  @@index([candidateId, jobPostingId])
+  @@index([jobPostingId])
 }
 
 // ─── Pipelines ──────────────────────────────────────────────
@@ -393,8 +448,9 @@ model EmailLog {
 // ─── Enums ──────────────────────────────────────────────────
 
 enum Role {
-  ADMIN
-  CANDIDATE
+  SUPER_ADMIN
+  HR_ADMIN
+  HIRING_MANAGER
 }
 
 enum DocumentStatus {

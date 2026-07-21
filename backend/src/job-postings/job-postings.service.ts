@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { AuditLogService } from '../audit/audit-log.service';
 import { DocumentRetrievalService } from '../documents/services/document-retrieval.service';
 import { EmbeddingsService } from '../shared/embeddings/embeddings.service';
 import { LlmClientService } from '../shared/llm/llm-client.service';
@@ -39,6 +40,7 @@ export class JobPostingsService {
     private readonly documentRetrieval: DocumentRetrievalService,
     private readonly llm: LlmClientService,
     private readonly embeddings: EmbeddingsService,
+    private readonly audit: AuditLogService,
   ) {}
 
   async create(
@@ -70,12 +72,21 @@ export class JobPostingsService {
     await this.syncSkills(job.id, dto.preferredSkills ?? [], false);
     await this.refreshEmbedding(job.id);
 
+    await this.audit.record({
+      actorUserId: createdByUserId,
+      action: 'job_posting.created',
+      resourceType: 'Job',
+      resourceId: job.id,
+      details: { title: dto.title },
+    });
+
     return this.getById(job.id);
   }
 
   async update(
     id: string,
     changes: UpdateJobPostingDto,
+    actorUserId: string,
   ): Promise<JobPostingWithSkills> {
     await this.getById(id); // throws NotFoundException if missing
 
@@ -121,15 +132,32 @@ export class JobPostingsService {
       await this.refreshEmbedding(id);
     }
 
+    await this.audit.record({
+      actorUserId,
+      action: 'job_posting.updated',
+      resourceType: 'Job',
+      resourceId: id,
+      details: { changes },
+    });
+
     return this.getById(id);
   }
 
-  async publish(id: string): Promise<JobPostingWithSkills> {
+  async publish(
+    id: string,
+    actorUserId: string,
+  ): Promise<JobPostingWithSkills> {
     const job = await this.getById(id);
     if (job.status !== 'PUBLISHED') {
       await this.prisma.job.update({
         where: { id },
         data: { status: 'PUBLISHED', portalPublishedAt: new Date() },
+      });
+      await this.audit.record({
+        actorUserId,
+        action: 'job_posting.published',
+        resourceType: 'Job',
+        resourceId: id,
       });
     }
     return this.getById(id);
@@ -146,9 +174,22 @@ export class JobPostingsService {
     return toJobPostingWithSkills(job);
   }
 
-  async list(filter: { status?: string }): Promise<JobPostingWithSkills[]> {
+  async list(filter: {
+    status?: string;
+    /** When set (Hiring Managers), only jobs this user is assigned to are returned. */
+    assignedToUserId?: string;
+  }): Promise<JobPostingWithSkills[]> {
     const jobs = await this.prisma.job.findMany({
-      where: filter.status ? { status: filter.status as never } : {},
+      where: {
+        ...(filter.status ? { status: filter.status as never } : {}),
+        ...(filter.assignedToUserId
+          ? {
+              hiringManagers: {
+                some: { hiringManagerUserId: filter.assignedToUserId },
+              },
+            }
+          : {}),
+      },
       include: { jobSkills: { include: { skill: true } } },
       orderBy: { createdAt: 'desc' },
     });

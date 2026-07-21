@@ -33,6 +33,12 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password.');
     }
 
+    // Same message as bad credentials — don't leak whether an email exists
+    // or is merely deactivated.
+    if (!user.isActive) {
+      throw new UnauthorizedException('Invalid email or password.');
+    }
+
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,

@@ -114,12 +114,12 @@ export class ToolRegistryService {
         };
         if (!jobPostingId) throw new Error('jobPostingId is required.');
         const dto = await parseAndValidate(UpdateJobPostingDto, changes ?? {});
-        return this.jobPostings.update(jobPostingId, dto);
+        return this.jobPostings.update(jobPostingId, dto, ctx.actorUserId);
       }
 
       case 'publishJobPosting': {
         const dto = await parseAndValidate(JobPostingIdArgsDto, args);
-        return this.jobPostings.publish(dto.jobPostingId);
+        return this.jobPostings.publish(dto.jobPostingId, ctx.actorUserId);
       }
 
       case 'uploadCandidateCv': {
@@ -130,7 +130,11 @@ export class ToolRegistryService {
               'No CV file was attached to this message. Ask HR to attach the PDF and resend.',
           };
         }
-        return this.cvUpload.uploadCv(dto.jobPostingId, ctx.attachedFile);
+        return this.cvUpload.uploadCv(
+          dto.jobPostingId,
+          ctx.attachedFile,
+          ctx.actorUserId,
+        );
       }
 
       case 'getCandidateProcessingStatus': {
@@ -140,7 +144,11 @@ export class ToolRegistryService {
 
       case 'matchCandidateToJob': {
         const dto = await parseAndValidate(CandidateJobArgsDto, args);
-        return this.matching.match(dto.candidateId, dto.jobPostingId);
+        return this.matching.match(
+          dto.candidateId,
+          dto.jobPostingId,
+          ctx.actorUserId,
+        );
       }
 
       case 'rankCandidatesForJob': {

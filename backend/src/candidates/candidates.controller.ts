@@ -19,9 +19,11 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { memoryStorage } from 'multer';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import type { AuthenticatedUser } from '../auth/types';
 import { UploadCvDto } from './dto/upload-cv.dto';
 import {
   CandidateProcessingStatus,
@@ -39,7 +41,7 @@ const pdfFileValidationPipe = new ParseFilePipeBuilder()
 @ApiTags('candidates')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN')
+@Roles('SUPER_ADMIN', 'HR_ADMIN')
 @Controller('candidates')
 export class CandidatesController {
   constructor(private readonly cvUpload: CvUploadService) {}
@@ -59,8 +61,9 @@ export class CandidatesController {
   async upload(
     @Body() body: UploadCvDto,
     @UploadedFile(pdfFileValidationPipe) file: Express.Multer.File,
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<UploadCvResult> {
-    return this.cvUpload.uploadCv(body.jobPostingId, file);
+    return this.cvUpload.uploadCv(body.jobPostingId, file, user.id);
   }
 
   @Get(':id/status')

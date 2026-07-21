@@ -4,6 +4,7 @@ import { AiModule } from './ai-chatbot/ai.module';
 import { AssistantModule } from './assistant/assistant.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
+import { CandidateCommentsModule } from './candidate-comments/candidate-comments.module';
 import { CandidatesModule } from './candidates/candidates.module';
 import { JobPostingsModule } from './job-postings/job-postings.module';
 import { MatchingModule } from './matching/matching.module';
@@ -12,6 +13,7 @@ import { BackgroundJobsModule } from './shared/background-jobs/background-jobs.m
 import { EmbeddingsModule } from './shared/embeddings/embeddings.module';
 import { LlmClientModule } from './shared/llm/llm-client.module';
 import { PdfModule } from './shared/pdf/pdf.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { PdfModule } from './shared/pdf/pdf.module';
     CandidatesModule,
     MatchingModule,
     AssistantModule,
+    UsersModule,
+    CandidateCommentsModule,
   ],
 })
 export class AppModule {}

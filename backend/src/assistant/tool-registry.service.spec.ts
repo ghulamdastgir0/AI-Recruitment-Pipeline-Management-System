@@ -103,7 +103,7 @@ describe('ToolRegistryService', () => {
       );
 
       expect(outcome.ok).toBe(true);
-      expect(matching.match).toHaveBeenCalledWith('cand-1', 'job-1');
+      expect(matching.match).toHaveBeenCalledWith('cand-1', 'job-1', 'user-1');
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({
           actorUserId: 'user-1',
@@ -162,7 +162,11 @@ describe('ToolRegistryService', () => {
         { actorUserId: 'user-1', attachedFile },
       );
 
-      expect(cvUpload.uploadCv).toHaveBeenCalledWith('job-1', attachedFile);
+      expect(cvUpload.uploadCv).toHaveBeenCalledWith(
+        'job-1',
+        attachedFile,
+        'user-1',
+      );
     });
 
     it('never throws even when the underlying service rejects', async () => {

@@ -15,7 +15,9 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { JobIdParam } from '../auth/decorators/job-id-param.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { JobAssignmentGuard } from '../auth/guards/job-assignment.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import type { AuthenticatedUser } from '../auth/types';
@@ -33,7 +35,7 @@ import { JobPostingsService } from './job-postings.service';
 @ApiTags('job-postings')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN')
+@Roles('SUPER_ADMIN', 'HR_ADMIN')
 @Controller('job-postings')
 export class JobPostingsController {
   constructor(private readonly jobPostings: JobPostingsService) {}
@@ -51,18 +53,30 @@ export class JobPostingsController {
   }
 
   @Get()
+  @Roles('SUPER_ADMIN', 'HR_ADMIN', 'HIRING_MANAGER')
   @ApiOperation({
-    summary: 'List job postings, optionally filtered by status.',
+    summary:
+      'List job postings, optionally filtered by status. Hiring Managers only see job postings they are assigned to.',
   })
   @ApiResponse({ status: 200, type: [JobPostingResponseDto] })
   async list(
+    @CurrentUser() user: AuthenticatedUser,
     @Query('status') status?: string,
   ): Promise<JobPostingResponseDto[]> {
-    return this.jobPostings.list({ status });
+    return this.jobPostings.list({
+      status,
+      assignedToUserId: user.role === 'HIRING_MANAGER' ? user.id : undefined,
+    });
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get a single job posting.' })
+  @Roles('SUPER_ADMIN', 'HR_ADMIN', 'HIRING_MANAGER')
+  @JobIdParam('id')
+  @UseGuards(JobAssignmentGuard)
+  @ApiOperation({
+    summary:
+      'Get a single job posting. Hiring Managers must be assigned to it.',
+  })
   @ApiResponse({ status: 200, type: JobPostingResponseDto })
   async getOne(@Param('id') id: string): Promise<JobPostingResponseDto> {
     return this.jobPostings.getById(id);
@@ -77,14 +91,18 @@ export class JobPostingsController {
   async update(
     @Param('id') id: string,
     @Body() body: UpdateJobPostingDto,
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<JobPostingResponseDto> {
-    return this.jobPostings.update(id, body);
+    return this.jobPostings.update(id, body, user.id);
   }
 
   @Post(':id/publish')
   @ApiOperation({ summary: 'Publish a job posting (sets status=PUBLISHED).' })
   @ApiResponse({ status: 200, type: JobPostingResponseDto })
-  async publish(@Param('id') id: string): Promise<JobPostingResponseDto> {
-    return this.jobPostings.publish(id);
+  async publish(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<JobPostingResponseDto> {
+    return this.jobPostings.publish(id, user.id);
   }
 }
