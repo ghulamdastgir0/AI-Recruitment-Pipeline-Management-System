@@ -1,0 +1,216 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import type { ExtractedCvProfileDto } from '../candidates/dto/extracted-cv-profile.dto';
+import { PrismaService } from '../prisma/prisma.service';
+import { EmbeddingsService } from '../shared/embeddings/embeddings.service';
+import {
+  computeMatch,
+  EvidenceEntry,
+  MatchComputation,
+  ResumePage,
+} from './scoring';
+
+const MODEL_VERSION = 'matching-v1';
+
+export interface MatchResultView {
+  applicationId: string;
+  candidateProfileId: string;
+  jobPostingId: string;
+  overallScore: number;
+  recommendation: string;
+  confidence: string;
+  summary: string;
+  matchedSkills: string[];
+  missingRequiredSkills: string[];
+  evidence: EvidenceEntry[];
+  breakdown: MatchComputation['breakdown'];
+  modelVersion: string;
+  processedAt: Date;
+}
+
+export type MatchOutcome =
+  | { status: 'READY'; matchResult: MatchResultView }
+  | { status: 'PROCESSING' | 'FAILED'; message: string };
+
+@Injectable()
+export class MatchingService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly embeddings: EmbeddingsService,
+  ) {}
+
+  async match(
+    candidateProfileId: string,
+    jobPostingId: string,
+  ): Promise<MatchOutcome> {
+    const [job, candidate] = await Promise.all([
+      this.loadJob(jobPostingId),
+      this.loadCandidate(candidateProfileId),
+    ]);
+
+    if (candidate.cvStatus !== 'READY') {
+      return {
+        status: candidate.cvStatus,
+        message:
+          candidate.cvStatus === 'PROCESSING'
+            ? 'This CV is still being processed (text extraction/parsing/embedding). Try again shortly.'
+            : `CV processing failed: ${candidate.cvProcessingError ?? 'unknown error'}`,
+      };
+    }
+
+    const application = await this.prisma.application.upsert({
+      where: {
+        candidateProfileId_jobId: { candidateProfileId, jobId: jobPostingId },
+      },
+      update: {},
+      create: { candidateProfileId, jobId: jobPostingId, status: 'APPLIED' },
+    });
+
+    const extracted =
+      candidate.extractedDataJson as ExtractedCvProfileDto | null;
+    const computation = computeMatch(
+      {
+        title: job.title,
+        description: job.description,
+        embedding: job.embedding,
+        requiredSkills: job.jobSkills
+          .filter((js) => js.required)
+          .map((js) => js.skill.name),
+        preferredSkills: job.jobSkills
+          .filter((js) => !js.required)
+          .map((js) => js.skill.name),
+        experienceMin: job.experienceMin,
+      },
+      {
+        skills: extracted?.skills ?? [],
+        experienceYears: candidate.experienceYears ?? 0,
+        embedding: candidate.embedding,
+        projects: extracted?.projects ?? [],
+        education: extracted?.education ?? [],
+        certifications: extracted?.certifications ?? [],
+        resumePages: (candidate.resumePagesJson as ResumePage[] | null) ?? [],
+      },
+    );
+
+    const matchResult = await this.prisma.matchResult.create({
+      data: {
+        applicationId: application.id,
+        overallScore: computation.overallScore,
+        recommendation: computation.recommendation,
+        confidence: computation.confidence,
+        summary: computation.summary,
+        matchedSkillsJson: computation.matchedSkills,
+        missingRequiredSkillsJson: computation.missingRequiredSkills,
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- see cv-processor.service.ts
+        evidenceJson: computation.evidence as unknown as object,
+        breakdownJson: computation.breakdown,
+        modelVersion: MODEL_VERSION,
+      },
+    });
+
+    await this.prisma.application.update({
+      where: { id: application.id },
+      data: { skillMatchPct: computation.overallScore, screenedAt: new Date() },
+    });
+
+    return {
+      status: 'READY',
+      matchResult: {
+        applicationId: application.id,
+        candidateProfileId,
+        jobPostingId,
+        overallScore: Number(matchResult.overallScore),
+        recommendation: matchResult.recommendation,
+        confidence: matchResult.confidence,
+        summary: matchResult.summary,
+        matchedSkills: computation.matchedSkills,
+        missingRequiredSkills: computation.missingRequiredSkills,
+        evidence: computation.evidence,
+        breakdown: computation.breakdown,
+        modelVersion: matchResult.modelVersion,
+        processedAt: matchResult.processedAt,
+      },
+    };
+  }
+
+  async getLatestExplanation(
+    candidateProfileId: string,
+    jobPostingId: string,
+  ): Promise<MatchResultView> {
+    const application = await this.prisma.application.findUnique({
+      where: {
+        candidateProfileId_jobId: { candidateProfileId, jobId: jobPostingId },
+      },
+      include: { matchResults: { orderBy: { processedAt: 'desc' }, take: 1 } },
+    });
+
+    const latest = application?.matchResults[0];
+    if (!application || !latest) {
+      throw new NotFoundException(
+        `No match result found for this candidate/job posting pair yet — call matchCandidateToJob first.`,
+      );
+    }
+
+    return {
+      applicationId: application.id,
+      candidateProfileId,
+      jobPostingId,
+      overallScore: Number(latest.overallScore),
+      recommendation: latest.recommendation,
+      confidence: latest.confidence,
+      summary: latest.summary,
+      matchedSkills: latest.matchedSkillsJson as unknown as string[],
+      missingRequiredSkills:
+        latest.missingRequiredSkillsJson as unknown as string[],
+      evidence: latest.evidenceJson as unknown as EvidenceEntry[],
+      breakdown:
+        latest.breakdownJson as unknown as MatchComputation['breakdown'],
+      modelVersion: latest.modelVersion,
+      processedAt: latest.processedAt,
+    };
+  }
+
+  private async loadJob(jobPostingId: string) {
+    const job = await this.prisma.job.findUnique({
+      where: { id: jobPostingId },
+      include: { jobSkills: { include: { skill: true } } },
+    });
+    if (!job) {
+      throw new NotFoundException(
+        `No job posting found with id "${jobPostingId}".`,
+      );
+    }
+
+    const rows = await this.prisma.$queryRaw<
+      { embeddingText: string | null }[]
+    >`
+      SELECT embedding::text AS "embeddingText" FROM "Job" WHERE id = ${jobPostingId}
+    `;
+
+    return {
+      ...job,
+      embedding: this.embeddings.parseVectorLiteral(rows[0]?.embeddingText),
+    };
+  }
+
+  private async loadCandidate(candidateProfileId: string) {
+    const candidate = await this.prisma.candidateProfile.findUnique({
+      where: { id: candidateProfileId },
+    });
+    if (!candidate) {
+      throw new NotFoundException(
+        `No candidate found with id "${candidateProfileId}".`,
+      );
+    }
+
+    const rows = await this.prisma.$queryRaw<
+      { embeddingText: string | null }[]
+    >`
+      SELECT "resumeEmbedding"::text AS "embeddingText" FROM "CandidateProfile" WHERE id = ${candidateProfileId}
+    `;
+
+    return {
+      ...candidate,
+      embedding: this.embeddings.parseVectorLiteral(rows[0]?.embeddingText),
+    };
+  }
+}

@@ -3,7 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmbeddingsService } from '../../shared/embeddings/embeddings.service';
 import { FileStorageService } from './file-storage.service';
-import { PdfTextExtractorService } from './pdf-text-extractor.service';
+import { PdfTextExtractorService } from '../../shared/pdf/pdf-text-extractor.service';
 import { TextChunkerService } from './text-chunker.service';
 
 /**

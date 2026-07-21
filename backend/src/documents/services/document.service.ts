@@ -8,7 +8,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { Document } from '../../generated/prisma/client';
 import { DocumentStatus } from '../../generated/prisma/enums';
-import { BackgroundJobQueueService } from './background-job-queue.service';
+import { BackgroundJobQueueService } from '../../shared/background-jobs/background-job-queue.service';
 import { DocumentProcessorService } from './document-processor.service';
 import { FileStorageService } from './file-storage.service';
 

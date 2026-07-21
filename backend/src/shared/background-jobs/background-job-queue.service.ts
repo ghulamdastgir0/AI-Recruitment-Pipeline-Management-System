@@ -7,7 +7,7 @@ type Job = () => Promise<void>;
  * immediately so the HTTP request that triggered it isn't blocked, while
  * the job itself runs off the request lifecycle. Isolated behind this class
  * so it can be swapped for a real queue (BullMQ/Redis, SQS, etc.) later
- * without touching callers.
+ * without touching callers. Shared by document processing and CV processing.
  */
 @Injectable()
 export class BackgroundJobQueueService {

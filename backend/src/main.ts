@@ -18,10 +18,7 @@ async function bootstrap() {
     .setTitle('AI Recruitment Pipeline API')
     .setDescription('API documentation for the AI Recruitment Pipeline backend')
     .setVersion('1.0')
-    .addApiKey(
-      { type: 'apiKey', name: 'x-admin-api-key', in: 'header' },
-      'admin-api-key',
-    )
+    .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api-docs', app, document);

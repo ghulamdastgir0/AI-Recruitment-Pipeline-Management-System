@@ -32,4 +32,18 @@ export default tseslint.config(
       "prettier/prettier": ["error", { endOfLine: "auto" }],
     },
   },
+  {
+    // jest.fn()-based mocks reassigned onto plain objects trip
+    // unbound-method's "this could be wrong at call time" check even though
+    // there's no real instance/`this` binding involved in a mock.
+    files: ['**/*.spec.ts'],
+    rules: {
+      '@typescript-eslint/unbound-method': 'off',
+      // `as unknown as jest.Mocked<X>` mock harnesses are inherently loosely
+      // typed at the call-argument level; these two rules mostly flag the
+      // mock plumbing itself rather than real unsafe code.
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+    },
+  },
 );

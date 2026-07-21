@@ -13,26 +13,31 @@ interface PdfJsTextItem {
 // pdfjs-dist ships ESM-only; loaded via dynamic import() from this CJS
 // module and cached, rather than pulled in through pdf-parse's bundled
 // (and years-stale) internal PDF.js, which fails on xref tables and content
-// streams produced by many modern PDF generators.
-let pdfjsModulePromise: Promise<typeof import('pdfjs-dist/legacy/build/pdf.mjs')> | null = null;
+// streams produced by many modern PDF generators. Shared by document and CV
+// processing — both need per-page text.
+let pdfjsModulePromise: Promise<
+  typeof import('pdfjs-dist/legacy/build/pdf.mjs')
+> | null = null;
 
 function loadPdfjs() {
   if (!pdfjsModulePromise) {
-    pdfjsModulePromise = import('pdfjs-dist/legacy/build/pdf.mjs').then((pdfjs) => {
-      // This file compiles to CommonJS, so `require` is available natively
-      // here (unlike in the ESM pdfjs-dist module itself). The worker path
-      // must be a file:// URL — on Windows, Node's ESM loader rejects a
-      // bare "E:\..." path with "Received protocol 'e:'".
-      pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
-        require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs'),
-      ).href;
-      return pdfjs;
-    });
+    pdfjsModulePromise = import('pdfjs-dist/legacy/build/pdf.mjs').then(
+      (pdfjs) => {
+        // This file compiles to CommonJS, so `require` is available natively
+        // here (unlike in the ESM pdfjs-dist module itself). The worker path
+        // must be a file:// URL — on Windows, Node's ESM loader rejects a
+        // bare "E:\..." path with "Received protocol 'e:'".
+        pdfjs.GlobalWorkerOptions.workerSrc = pathToFileURL(
+          require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs'),
+        ).href;
+        return pdfjs;
+      },
+    );
   }
   return pdfjsModulePromise;
 }
 
-/** Extracts per-page text from a PDF buffer so chunks can carry an accurate page number. */
+/** Extracts per-page text from a PDF buffer so chunks/evidence can carry an accurate page number. */
 @Injectable()
 export class PdfTextExtractorService {
   async extractPages(buffer: Buffer): Promise<ExtractedPage[]> {
@@ -49,7 +54,9 @@ export class PdfTextExtractorService {
         const page = await pdf.getPage(pageNumber);
         try {
           const textContent = await page.getTextContent();
-          const text = (textContent.items as PdfJsTextItem[]).map((item) => item.str ?? '').join(' ');
+          const text = (textContent.items as PdfJsTextItem[])
+            .map((item) => item.str ?? '')
+            .join(' ');
           pages.push({ pageNumber, text });
         } finally {
           page.cleanup();

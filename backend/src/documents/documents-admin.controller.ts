@@ -15,18 +15,22 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
+  ApiBearerAuth,
   ApiConsumes,
   ApiOperation,
   ApiResponse,
-  ApiSecurity,
   ApiTags,
 } from '@nestjs/swagger';
 import { memoryStorage } from 'multer';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import type { AuthenticatedUser } from '../auth/types';
 import { DocumentResponseDto } from './dto/document-response.dto';
 import { ListDocumentsQueryDto } from './dto/list-documents-query.dto';
 import { UpdateDocumentStatusDto } from './dto/update-document-status.dto';
 import { UploadDocumentDto } from './dto/upload-document.dto';
-import { AdminApiKeyGuard } from './guards/admin-api-key.guard';
 import { DocumentService } from './services/document.service';
 import { FileStorageService } from './services/file-storage.service';
 
@@ -60,8 +64,9 @@ function toResponseDto(document: {
 }
 
 @ApiTags('admin-documents')
-@ApiSecurity('admin-api-key')
-@UseGuards(AdminApiKeyGuard)
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('ADMIN')
 @Controller('admin/documents')
 export class DocumentsAdminController {
   constructor(
@@ -85,8 +90,13 @@ export class DocumentsAdminController {
   async upload(
     @Body() body: UploadDocumentDto,
     @UploadedFile(pdfFileValidationPipe) file: Express.Multer.File,
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<DocumentResponseDto> {
-    const document = await this.documents.uploadNewDocument(body.name, file);
+    const document = await this.documents.uploadNewDocument(
+      body.name,
+      file,
+      user.id,
+    );
     return toResponseDto(document);
   }
 
@@ -144,8 +154,9 @@ export class DocumentsAdminController {
   async uploadNewVersion(
     @Param('id') id: string,
     @UploadedFile(pdfFileValidationPipe) file: Express.Multer.File,
+    @CurrentUser() user: AuthenticatedUser,
   ): Promise<DocumentResponseDto> {
-    const document = await this.documents.uploadNewVersion(id, file);
+    const document = await this.documents.uploadNewVersion(id, file, user.id);
     return toResponseDto(document);
   }
 

@@ -1,0 +1,90 @@
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import type { AuthenticatedUser } from '../auth/types';
+import { CreateJobPostingDto } from './dto/create-job-posting.dto';
+import { JobPostingResponseDto } from './dto/job-posting-response.dto';
+import { UpdateJobPostingDto } from './dto/update-job-posting.dto';
+import { JobPostingsService } from './job-postings.service';
+
+/**
+ * Direct HTTP surface for job postings — independent of the LLM assistant,
+ * useful for a future dashboard and for testing the underlying logic
+ * without going through tool-calling. The assistant's tool registry calls
+ * this same JobPostingsService directly.
+ */
+@ApiTags('job-postings')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('ADMIN')
+@Controller('job-postings')
+export class JobPostingsController {
+  constructor(private readonly jobPostings: JobPostingsService) {}
+
+  @Post()
+  @ApiOperation({
+    summary: 'Create a new job posting (status starts as DRAFT).',
+  })
+  @ApiResponse({ status: 201, type: JobPostingResponseDto })
+  async create(
+    @Body() body: CreateJobPostingDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<JobPostingResponseDto> {
+    return this.jobPostings.create(body, user.id);
+  }
+
+  @Get()
+  @ApiOperation({
+    summary: 'List job postings, optionally filtered by status.',
+  })
+  @ApiResponse({ status: 200, type: [JobPostingResponseDto] })
+  async list(
+    @Query('status') status?: string,
+  ): Promise<JobPostingResponseDto[]> {
+    return this.jobPostings.list({ status });
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get a single job posting.' })
+  @ApiResponse({ status: 200, type: JobPostingResponseDto })
+  async getOne(@Param('id') id: string): Promise<JobPostingResponseDto> {
+    return this.jobPostings.getById(id);
+  }
+
+  @Patch(':id')
+  @ApiOperation({
+    summary:
+      'Update a job posting. Changing `status` here is a direct write (no confirmation gate) — the assistant enforces that gate itself before calling this.',
+  })
+  @ApiResponse({ status: 200, type: JobPostingResponseDto })
+  async update(
+    @Param('id') id: string,
+    @Body() body: UpdateJobPostingDto,
+  ): Promise<JobPostingResponseDto> {
+    return this.jobPostings.update(id, body);
+  }
+
+  @Post(':id/publish')
+  @ApiOperation({ summary: 'Publish a job posting (sets status=PUBLISHED).' })
+  @ApiResponse({ status: 200, type: JobPostingResponseDto })
+  async publish(@Param('id') id: string): Promise<JobPostingResponseDto> {
+    return this.jobPostings.publish(id);
+  }
+}

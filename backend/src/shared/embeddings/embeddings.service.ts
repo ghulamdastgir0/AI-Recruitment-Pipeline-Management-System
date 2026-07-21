@@ -31,4 +31,10 @@ export class EmbeddingsService {
   toVectorLiteral(embedding: number[]): string {
     return `[${embedding.join(',')}]`;
   }
+
+  /** Parses a pgvector column selected via `::text` (e.g. `[0.1,0.2,...]`) back into a plain number array. */
+  parseVectorLiteral(text: string | null | undefined): number[] | null {
+    if (!text) return null;
+    return JSON.parse(text) as number[];
+  }
 }

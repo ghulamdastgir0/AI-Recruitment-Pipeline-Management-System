@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { ExtractedPage } from './pdf-text-extractor.service';
+import type { ExtractedPage } from '../../shared/pdf/pdf-text-extractor.service';
 
 export interface TextChunk {
   pageNumber: number;
