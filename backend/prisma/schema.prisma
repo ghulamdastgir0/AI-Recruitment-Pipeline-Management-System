@@ -24,16 +24,17 @@ model User {
   role         Role
   createdAt    DateTime @default(now())
 
-  candidateProfile CandidateProfile?
-  jobsCreated      Job[]             @relation("JobCreatedBy")
-  emailsTriggered  EmailLog[]        @relation("EmailTriggeredBy")
+  candidateProfile  CandidateProfile?
+  jobsCreated       Job[]             @relation("JobCreatedBy")
+  emailsTriggered   EmailLog[]        @relation("EmailTriggeredBy")
+  documentsUploaded Document[]        @relation("DocumentUploadedBy")
 }
 
 model CandidateProfile {
-  id                String                       @id @default(uuid())
-  userId            String                       @unique
+  id                String                      @id @default(uuid())
+  userId            String                      @unique
   resumeUrl         String
-  resumeText        String?                      @db.Text
+  resumeText        String?                     @db.Text
   // Raw LLM Schema Extractor output (FR-RES-01): name/email/skills/experience
   // as parsed from the uploaded document, kept for audit independent of the
   // user-entered profile fields above.
@@ -41,8 +42,8 @@ model CandidateProfile {
   educationJson     Json
   experienceYears   Int
   resumeEmbedding   Unsupported("vector(384)")?
-  updatedAt         DateTime                     @updatedAt
-  createdAt         DateTime                     @default(now())
+  updatedAt         DateTime                    @updatedAt
+  createdAt         DateTime                    @default(now())
 
   user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   candidateSkills CandidateSkill[]
@@ -68,20 +69,51 @@ model Skill {
   candidateSkillGrades CandidateSkillGrade[]
 }
 
-// ─── RAG Knowledge Base ─────────────────────────────────────
-// FR-JOB-01: internal wiki/stack/culture documents embedded via pgvector
-// so the JD generator can retrieve company-specific context for a raw prompt.
+// ─── HR Policy Document RAG (chatbot) ────────────────────────
+// Admin-uploaded company policy PDFs. Each upload is stored permanently and
+// processed exactly once into embedded chunks; re-uploading the same
+// document creates a new version rather than mutating the old one, so the
+// chatbot always retrieves from a single ACTIVE version while every prior
+// version is preserved for audit history.
 
-model KnowledgeDocument {
-  id         String                       @id @default(uuid())
-  title      String
-  sourceType KnowledgeSourceType
-  content    String                       @db.Text
+model Document {
+  id               String         @id @default(uuid())
+  name             String
+  originalFileName String
+  filePath         String
+  // SHA-256 of the uploaded file bytes — lets the upload endpoint detect an
+  // identical re-upload of the same version and skip reprocessing it.
+  contentHash      String
+  version          Int
+  status           DocumentStatus @default(PROCESSING)
+  // Populated only if background extraction/embedding fails, so a bad PDF
+  // is visible to an admin instead of silently stuck in PROCESSING.
+  processingError  String?        @db.Text
+  uploadedByUserId String?
+  uploadedAt       DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  uploadedBy User?           @relation("DocumentUploadedBy", fields: [uploadedByUserId], references: [id])
+  chunks     DocumentChunk[]
+
+  @@unique([name, version])
+  @@index([name, status])
+  @@index([status])
+}
+
+model DocumentChunk {
+  id         String                      @id @default(uuid())
+  documentId String
+  content    String                      @db.Text
   embedding  Unsupported("vector(384)")?
-  createdAt  DateTime                     @default(now())
-  updatedAt  DateTime                     @updatedAt
+  pageNumber Int
+  chunkIndex Int
+  createdAt  DateTime                    @default(now())
 
-  @@index([sourceType])
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, chunkIndex])
+  @@index([documentId])
 }
 
 // ─── Jobs / Config ──────────────────────────────────────────
@@ -92,9 +124,9 @@ model Job {
 
   // FR-JOB-01/02: the HR one-line prompt, the raw RAG/LLM output, and the
   // final (possibly HR-edited) description that actually gets published.
-  rawPrompt            String                       @db.Text
-  generatedDescription String                       @db.Text
-  description          String                       @db.Text
+  rawPrompt            String                      @db.Text
+  generatedDescription String                      @db.Text
+  description          String                      @db.Text
   embedding            Unsupported("vector(384)")?
 
   experienceMin Int
@@ -256,11 +288,11 @@ enum Role {
   CANDIDATE
 }
 
-enum KnowledgeSourceType {
-  WIKI
-  STACK_PREFERENCE
-  CULTURE_GUIDELINE
-  OTHER
+enum DocumentStatus {
+  PROCESSING
+  ACTIVE
+  INACTIVE
+  FAILED
 }
 
 enum JobStatus {
