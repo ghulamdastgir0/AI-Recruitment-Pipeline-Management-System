@@ -13,6 +13,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiConsumes,
   ApiOperation,
   ApiResponse,
@@ -56,6 +57,30 @@ export class AssistantController {
       'Conversation history is stateless — resend prior turns as JSON in `history` each time.',
   })
   @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['message'],
+      properties: {
+        message: {
+          type: 'string',
+          example:
+            'Create a job posting for a Senior Backend Engineer in Lahore.',
+        },
+        history: {
+          type: 'string',
+          description:
+            'JSON-encoded array of prior turns: [{ "role": "user"|"assistant", "content": "..." }]',
+          example: '[]',
+        },
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: 'Optional CV attachment (PDF).',
+        },
+      },
+    },
+  })
   @ApiResponse({
     status: 200,
     description:

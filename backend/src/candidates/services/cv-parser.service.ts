@@ -30,7 +30,7 @@ Rules:
 - If a field genuinely isn't present in the CV, use null (for strings) or an empty array (for lists) — never invent data.
 - Output only the JSON object, no surrounding prose.`;
 
-const MAX_PARSE_ATTEMPTS = 2;
+const MAX_PARSE_ATTEMPTS = 3;
 
 @Injectable()
 export class CvParserService {
@@ -40,21 +40,28 @@ export class CvParserService {
     let lastError = '';
 
     for (let attempt = 1; attempt <= MAX_PARSE_ATTEMPTS; attempt++) {
-      const result = await this.llm.chat(
-        [
-          { role: 'system', content: CV_PARSER_SYSTEM_PROMPT },
-          {
-            role: 'user',
-            content:
-              attempt === 1
-                ? `CV text:\n\n${resumeText}`
-                : `CV text:\n\n${resumeText}\n\nYour previous output was invalid (${lastError}). Return only the corrected JSON object.`,
-          },
-        ],
-        { jsonResponse: true },
-      );
-
       try {
+        // The LLM call itself belongs inside this try, not just the parsing
+        // below it — Groq's JSON mode hard-validates server-side and throws
+        // a 400 (json_validate_failed) instead of returning malformed
+        // content when the model doesn't produce valid JSON. That failure
+        // needs to feed the same retry-with-correction loop as our own
+        // parse/validation errors, or attempt 1 permanently fails the CV
+        // the moment the model produces one bad completion.
+        const result = await this.llm.chat(
+          [
+            { role: 'system', content: CV_PARSER_SYSTEM_PROMPT },
+            {
+              role: 'user',
+              content:
+                attempt === 1
+                  ? `CV text:\n\n${resumeText}`
+                  : `CV text:\n\n${resumeText}\n\nYour previous output was invalid (${lastError}). Return ONLY a single valid JSON object matching the schema — no prose, no markdown, no trailing commentary.`,
+            },
+          ],
+          { jsonResponse: true },
+        );
+
         const raw: unknown = JSON.parse(result.message.content ?? '{}');
         const sanitized = stripProtectedCharacteristics(raw);
         const normalized = normalizeShape(sanitized);
@@ -67,7 +74,7 @@ export class CvParserService {
           .map((e) => Object.values(e.constraints ?? {}).join('; '))
           .join('; ');
       } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
+        lastError = summarizeParseFailure(error);
       }
     }
 
@@ -75,6 +82,22 @@ export class CvParserService {
       `CV parsing produced invalid structured data after ${MAX_PARSE_ATTEMPTS} attempts: ${lastError}`,
     );
   }
+}
+
+/**
+ * Groq's json_validate_failed errors embed the model's entire malformed
+ * output (often a full CV-shaped wall of text) in `failed_generation`.
+ * Echoing that verbatim into the next retry prompt just hands the model
+ * another CV-like blob to "correct" instead of a clear signal to fix its
+ * output shape, which tends to reproduce the same non-JSON response again.
+ * Collapse it to a short, generic instruction instead.
+ */
+function summarizeParseFailure(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes('json_validate_failed')) {
+    return 'the response was not a valid JSON object';
+  }
+  return message.slice(0, 300);
 }
 
 /** Fills in the array/number defaults the LLM sometimes omits so validation failures are about real data problems, not shape noise. */

@@ -16,6 +16,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiConsumes,
   ApiOperation,
   ApiResponse,
@@ -80,6 +81,20 @@ export class DocumentsAdminController {
       'Upload the first version of a new HR policy PDF. Extraction/embedding runs in the background.',
   })
   @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['name', 'file'],
+      properties: {
+        name: {
+          type: 'string',
+          description:
+            'Stable display name grouping every version of this document.',
+        },
+        file: { type: 'string', format: 'binary' },
+      },
+    },
+  })
   @ApiResponse({ status: 201, type: DocumentResponseDto })
   @UseInterceptors(
     FileInterceptor('file', {
@@ -144,6 +159,15 @@ export class DocumentsAdminController {
       'The new version is processed and, once fully embedded, becomes ACTIVE while the previous ACTIVE version is marked INACTIVE.',
   })
   @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: { type: 'string', format: 'binary' },
+      },
+    },
+  })
   @ApiResponse({ status: 201, type: DocumentResponseDto })
   @UseInterceptors(
     FileInterceptor('file', {

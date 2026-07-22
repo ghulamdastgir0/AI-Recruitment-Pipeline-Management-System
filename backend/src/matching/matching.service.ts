@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { AuditLogService } from '../audit/audit-log.service';
 import type { ExtractedCvProfileDto } from '../candidates/dto/extracted-cv-profile.dto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -34,16 +34,24 @@ export type MatchOutcome =
 
 @Injectable()
 export class MatchingService {
+  private readonly logger = new Logger(MatchingService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly embeddings: EmbeddingsService,
     private readonly audit: AuditLogService,
   ) {}
 
+  /**
+   * `actorUserId` is omitted for system-triggered auto-matching (e.g. right
+   * after a CV finishes processing) — there's no human actor to attribute an
+   * audit row to there, same reasoning as CvUploadService's SELF_APPLIED
+   * uploads.
+   */
   async match(
     candidateProfileId: string,
     jobPostingId: string,
-    actorUserId: string,
+    actorUserId?: string,
   ): Promise<MatchOutcome> {
     const [job, candidate] = await Promise.all([
       this.loadJob(jobPostingId),
@@ -115,17 +123,19 @@ export class MatchingService {
       data: { skillMatchPct: computation.overallScore, screenedAt: new Date() },
     });
 
-    await this.audit.record({
-      actorUserId,
-      action: 'candidate_score.generated',
-      resourceType: 'MatchResult',
-      resourceId: matchResult.id,
-      details: {
-        candidateProfileId,
-        jobPostingId,
-        overallScore: computation.overallScore,
-      },
-    });
+    if (actorUserId) {
+      await this.audit.record({
+        actorUserId,
+        action: 'candidate_score.generated',
+        resourceType: 'MatchResult',
+        resourceId: matchResult.id,
+        details: {
+          candidateProfileId,
+          jobPostingId,
+          overallScore: computation.overallScore,
+        },
+      });
+    }
 
     return {
       status: 'READY',
@@ -145,6 +155,30 @@ export class MatchingService {
         processedAt: matchResult.processedAt,
       },
     };
+  }
+
+  /**
+   * Auto-scores every application for this candidate that doesn't have a
+   * match result yet (called once a CV reaches READY, and again whenever a
+   * content-hash-deduped CV is reused against a new job posting). Each
+   * application is scored independently — one bad job posting embedding
+   * shouldn't stop the candidate from being scored against the others.
+   */
+  async matchAllPendingApplications(candidateProfileId: string): Promise<void> {
+    const pending = await this.prisma.application.findMany({
+      where: { candidateProfileId, matchResults: { none: {} } },
+    });
+
+    for (const application of pending) {
+      try {
+        await this.match(candidateProfileId, application.jobId);
+      } catch (error) {
+        this.logger.warn(
+          `Auto-match failed for candidate ${candidateProfileId} / job ${application.jobId}: ` +
+            (error instanceof Error ? error.message : String(error)),
+        );
+      }
+    }
   }
 
   async getLatestExplanation(

@@ -165,6 +165,7 @@ describe('ToolRegistryService', () => {
       expect(cvUpload.uploadCv).toHaveBeenCalledWith(
         'job-1',
         attachedFile,
+        'HR_SOURCED',
         'user-1',
       );
     });

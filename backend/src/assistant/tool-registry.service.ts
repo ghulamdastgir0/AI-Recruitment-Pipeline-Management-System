@@ -133,6 +133,7 @@ export class ToolRegistryService {
         return this.cvUpload.uploadCv(
           dto.jobPostingId,
           ctx.attachedFile,
+          'HR_SOURCED',
           ctx.actorUserId,
         );
       }

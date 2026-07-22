@@ -12,18 +12,14 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
-  ApiBearerAuth,
+  ApiBody,
   ApiConsumes,
   ApiOperation,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { memoryStorage } from 'multer';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import type { AuthenticatedUser } from '../auth/types';
 import { UploadCvDto } from './dto/upload-cv.dto';
 import {
   CandidateProcessingStatus,
@@ -38,20 +34,42 @@ const pdfFileValidationPipe = new ParseFilePipeBuilder()
   .addMaxSizeValidator({ maxSize: MAX_CV_BYTES })
   .build({ errorHttpStatusCode: HttpStatus.BAD_REQUEST });
 
+/**
+ * Public candidate self-apply surface — no authentication, by design. HR/
+ * Admin never use this controller; staff CV upload and status checks go
+ * through the AI assistant's uploadCandidateCv/getCandidateProcessingStatus
+ * tools instead (see assistant/tool-registry.service.ts), which are
+ * JWT-guarded and audit-logged. Keeping the two paths separate (rather than
+ * one dual-mode endpoint) is what actually avoids duplication here — this
+ * controller only ever needs to know about SELF_APPLIED candidates.
+ */
 @ApiTags('candidates')
-@ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('SUPER_ADMIN', 'HR_ADMIN')
 @Controller('candidates')
 export class CandidatesController {
   constructor(private readonly cvUpload: CvUploadService) {}
 
   @Post('upload')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 10, ttl: 600_000 } })
   @ApiOperation({
     summary:
-      'Upload a candidate CV against a job posting. Processing (extract/parse/embed) runs in the background.',
+      'Apply to a job posting with your CV. No authentication required. ' +
+      'Only accepted for currently PUBLISHED postings.',
   })
   @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['jobPostingId', 'file'],
+      properties: {
+        jobPostingId: {
+          type: 'string',
+          description: 'Id of the job posting this CV is being submitted for.',
+        },
+        file: { type: 'string', format: 'binary' },
+      },
+    },
+  })
   @UseInterceptors(
     FileInterceptor('file', {
       storage: memoryStorage(),
@@ -61,14 +79,17 @@ export class CandidatesController {
   async upload(
     @Body() body: UploadCvDto,
     @UploadedFile(pdfFileValidationPipe) file: Express.Multer.File,
-    @CurrentUser() user: AuthenticatedUser,
   ): Promise<UploadCvResult> {
-    return this.cvUpload.uploadCv(body.jobPostingId, file, user.id);
+    return this.cvUpload.uploadCv(body.jobPostingId, file, 'SELF_APPLIED');
   }
 
   @Get(':id/status')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @ApiOperation({
-    summary: 'Check CV processing status (PROCESSING | READY | FAILED).',
+    summary:
+      'Check your application status with the reference id (candidateProfileId) returned from upload. ' +
+      'No authentication required. Never exposes your match score — scores are for HR/Hiring Manager review only.',
   })
   @ApiResponse({ status: 200 })
   async getStatus(@Param('id') id: string): Promise<CandidateProcessingStatus> {

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { MatchingService } from '../../matching/matching.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmbeddingsService } from '../../shared/embeddings/embeddings.service';
 import { PdfTextExtractorService } from '../../shared/pdf/pdf-text-extractor.service';
@@ -22,6 +23,7 @@ export class CvProcessorService {
     private readonly pdfExtractor: PdfTextExtractorService,
     private readonly parser: CvParserService,
     private readonly embeddings: EmbeddingsService,
+    private readonly matching: MatchingService,
   ) {}
 
   async process(candidateProfileId: string): Promise<void> {
@@ -76,6 +78,21 @@ export class CvProcessorService {
       this.logger.log(
         `Processed CV for candidate profile ${candidateProfileId}: ${parsed.skills.length} skills extracted.`,
       );
+
+      // Score against whatever job postings this candidate already has
+      // applications for. A scoring failure here shouldn't flip cvStatus
+      // to FAILED — the CV itself parsed fine, it's the follow-up matching
+      // step that had trouble — so this is caught separately.
+      try {
+        await this.matching.matchAllPendingApplications(candidateProfileId);
+      } catch (matchError) {
+        this.logger.warn(
+          `Auto-match failed for candidate profile ${candidateProfileId}: ` +
+            (matchError instanceof Error
+              ? matchError.message
+              : String(matchError)),
+        );
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(

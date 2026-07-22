@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { AiModule } from './ai-chatbot/ai.module';
 import { AssistantModule } from './assistant/assistant.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
@@ -25,7 +24,6 @@ import { UsersModule } from './users/users.module';
     PdfModule,
     AuditModule,
     AuthModule,
-    AiModule,
     JobPostingsModule,
     CandidatesModule,
     MatchingModule,
