@@ -2,7 +2,12 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { AuditLogService } from '../audit/audit-log.service';
 import type { ExtractedCvProfileDto } from '../candidates/dto/extracted-cv-profile.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { EmailService } from '../shared/email/email.service';
 import { EmbeddingsService } from '../shared/embeddings/embeddings.service';
+import {
+  INTERVIEW_SCORE_THRESHOLD,
+  INTERVIEW_WINDOW_HOURS,
+} from './matching.constants';
 import {
   computeMatch,
   EvidenceEntry,
@@ -40,6 +45,7 @@ export class MatchingService {
     private readonly prisma: PrismaService,
     private readonly embeddings: EmbeddingsService,
     private readonly audit: AuditLogService,
+    private readonly email: EmailService,
   ) {}
 
   /**
@@ -123,6 +129,18 @@ export class MatchingService {
       data: { skillMatchPct: computation.overallScore, screenedAt: new Date() },
     });
 
+    // Only decide once — matchAllPendingApplications / a manual re-match both
+    // reuse this same match() method, and status !== 'APPLIED' means this
+    // application already got its invite/rejection email on an earlier run.
+    if (application.status === 'APPLIED') {
+      await this.applyScreeningDecision(
+        application.id,
+        job.title,
+        extracted,
+        computation.overallScore,
+      );
+    }
+
     if (actorUserId) {
       await this.audit.record({
         actorUserId,
@@ -155,6 +173,73 @@ export class MatchingService {
         processedAt: matchResult.processedAt,
       },
     };
+  }
+
+  /**
+   * First-time-only screening decision: score >= threshold opens the 48h
+   * interview window and sends the invite; otherwise the application is
+   * screened out with a rejection email. Both branches are best-effort on
+   * the email — a Brevo failure shouldn't lose the status transition, and
+   * EmailService.send() itself never throws (returns false on failure).
+   */
+  private async applyScreeningDecision(
+    applicationId: string,
+    jobTitle: string,
+    extracted: ExtractedCvProfileDto | null,
+    overallScore: number,
+  ): Promise<void> {
+    const candidateEmail = extracted?.email ?? null;
+    const candidateName = extracted?.name ?? null;
+
+    if (overallScore >= INTERVIEW_SCORE_THRESHOLD) {
+      const now = new Date();
+      const windowExpiresAt = new Date(
+        now.getTime() + INTERVIEW_WINDOW_HOURS * 60 * 60 * 1000,
+      );
+
+      await this.prisma.application.update({
+        where: { id: applicationId },
+        data: {
+          status: 'INTERVIEW_PENDING',
+          interviewWindowOpensAt: now,
+          interviewWindowExpiresAt: windowExpiresAt,
+        },
+      });
+      await this.prisma.aIInterviewSession.create({
+        data: { applicationId, status: 'PENDING', windowExpiresAt },
+      });
+
+      const sent = await this.email.send({
+        to: candidateEmail,
+        type: 'INTERVIEW_ACKNOWLEDGEMENT',
+        variables: {
+          candidateName,
+          jobTitle,
+          interviewDeadline: windowExpiresAt,
+        },
+      });
+      if (sent) {
+        await this.prisma.emailLog.create({
+          data: { applicationId, type: 'INTERVIEW_ACKNOWLEDGEMENT' },
+        });
+      }
+    } else {
+      await this.prisma.application.update({
+        where: { id: applicationId },
+        data: { status: 'SCREENING_REJECTED' },
+      });
+
+      const sent = await this.email.send({
+        to: candidateEmail,
+        type: 'SCREENING_REJECTION',
+        variables: { candidateName, jobTitle },
+      });
+      if (sent) {
+        await this.prisma.emailLog.create({
+          data: { applicationId, type: 'SCREENING_REJECTION' },
+        });
+      }
+    }
   }
 
   /**

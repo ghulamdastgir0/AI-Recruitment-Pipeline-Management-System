@@ -103,6 +103,7 @@ model Skill {
   candidateSkills      CandidateSkill[]
   jobSkills            JobSkill[]
   candidateSkillGrades CandidateSkillGrade[]
+  interviewQuestions   AIInterviewQuestion[]
 }
 
 // ─── HR Policy Document RAG (chatbot) ────────────────────────
@@ -406,7 +407,17 @@ model AIInterviewQuestion {
   askedAt           DateTime?
   answeredAt        DateTime?
 
-  session AIInterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  // Which skill this question is probing, and whether it's a fresh topic or
+  // a targeted follow-up on the previous question — lets the orchestrator
+  // track "distinct skills covered" vs "follow-ups used" across turns
+  // (each turn is a separate HTTP request/response, so this can't just be
+  // held in memory) and lets grading roll follow-up answers into the same
+  // CandidateSkillGrade as their parent question.
+  targetSkillId String?
+  isFollowUp    Boolean @default(false)
+
+  session     AIInterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  targetSkill Skill?             @relation(fields: [targetSkillId], references: [id])
 
   @@index([sessionId, sequenceOrder])
 }
