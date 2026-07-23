@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { AuditLogService } from '../audit/audit-log.service';
+import { resolveCandidateIdentity } from '../candidates/candidate-identity.util';
 import type { ExtractedCvProfileDto } from '../candidates/dto/extracted-cv-profile.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../shared/email/email.service';
@@ -22,6 +23,10 @@ export interface MatchResultView {
   applicationId: string;
   candidateProfileId: string;
   jobPostingId: string;
+  candidateName: string | null;
+  candidateEmail: string | null;
+  candidatePhone: string | null;
+  applicationStatus: string;
   overallScore: number;
   recommendation: string;
   confidence: string;
@@ -142,11 +147,12 @@ export class MatchingService {
     // Only decide once — matchAllPendingApplications / a manual re-match both
     // reuse this same match() method, and status !== 'APPLIED' means this
     // application already got its invite/rejection email on an earlier run.
+    let finalStatus = application.status;
     if (application.status === 'APPLIED') {
-      await this.applyScreeningDecision(
+      finalStatus = await this.applyScreeningDecision(
         application.id,
         job.title,
-        extracted,
+        candidate,
         computation.overallScore,
       );
     }
@@ -165,12 +171,18 @@ export class MatchingService {
       });
     }
 
+    const { name, email, phone } = resolveCandidateIdentity(candidate);
+
     return {
       status: 'READY',
       matchResult: {
         applicationId: application.id,
         candidateProfileId,
         jobPostingId,
+        candidateName: name,
+        candidateEmail: email,
+        candidatePhone: phone,
+        applicationStatus: finalStatus,
         overallScore: Number(matchResult.overallScore),
         recommendation: matchResult.recommendation,
         confidence: matchResult.confidence,
@@ -195,11 +207,16 @@ export class MatchingService {
   private async applyScreeningDecision(
     applicationId: string,
     jobTitle: string,
-    extracted: ExtractedCvProfileDto | null,
+    candidate: {
+      candidateName: string | null;
+      candidateEmail: string | null;
+      candidatePhone: string | null;
+      extractedDataJson: unknown;
+    },
     overallScore: number,
-  ): Promise<void> {
-    const candidateEmail = extracted?.email ?? null;
-    const candidateName = extracted?.name ?? null;
+  ): Promise<'INTERVIEW_PENDING' | 'SCREENING_REJECTED'> {
+    const { email: candidateEmail, name: candidateName } =
+      resolveCandidateIdentity(candidate);
 
     if (overallScore >= INTERVIEW_SCORE_THRESHOLD) {
       const now = new Date();
@@ -234,6 +251,7 @@ export class MatchingService {
           data: { applicationId, type: 'INTERVIEW_ACKNOWLEDGEMENT' },
         });
       }
+      return 'INTERVIEW_PENDING';
     } else {
       await this.prisma.application.update({
         where: { id: applicationId },
@@ -250,6 +268,7 @@ export class MatchingService {
           data: { applicationId, type: 'SCREENING_REJECTION' },
         });
       }
+      return 'SCREENING_REJECTED';
     }
   }
 
@@ -285,7 +304,10 @@ export class MatchingService {
       where: {
         candidateProfileId_jobId: { candidateProfileId, jobId: jobPostingId },
       },
-      include: { matchResults: { orderBy: { processedAt: 'desc' }, take: 1 } },
+      include: {
+        candidateProfile: true,
+        matchResults: { orderBy: { processedAt: 'desc' }, take: 1 },
+      },
     });
 
     const latest = application?.matchResults[0];
@@ -295,10 +317,18 @@ export class MatchingService {
       );
     }
 
+    const { name, email, phone } = resolveCandidateIdentity(
+      application.candidateProfile,
+    );
+
     return {
       applicationId: application.id,
       candidateProfileId,
       jobPostingId,
+      candidateName: name,
+      candidateEmail: email,
+      candidatePhone: phone,
+      applicationStatus: application.status,
       overallScore: Number(latest.overallScore),
       recommendation: latest.recommendation,
       confidence: latest.confidence,
@@ -311,6 +341,25 @@ export class MatchingService {
         latest.breakdownJson as unknown as MatchComputation['breakdown'],
       modelVersion: latest.modelVersion,
       processedAt: latest.processedAt,
+    };
+  }
+
+  /** Resolves the on-disk path for a candidate's original CV, for the staff CV-download endpoint. Never returns the path itself to a caller outside this service. */
+  async getResumeFile(
+    candidateProfileId: string,
+  ): Promise<{ filePath: string; displayName: string }> {
+    const candidate = await this.prisma.candidateProfile.findUnique({
+      where: { id: candidateProfileId },
+    });
+    if (!candidate?.resumeFilePath) {
+      throw new NotFoundException(
+        `No CV file found for candidate "${candidateProfileId}".`,
+      );
+    }
+    const { name } = resolveCandidateIdentity(candidate);
+    return {
+      filePath: candidate.resumeFilePath,
+      displayName: `${name ?? candidateProfileId}.pdf`,
     };
   }
 

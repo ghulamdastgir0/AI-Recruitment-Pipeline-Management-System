@@ -9,6 +9,7 @@ import type { ExtractedCvProfileDto } from '../../candidates/dto/extracted-cv-pr
 import { PrismaService } from '../../prisma/prisma.service';
 import { AudioStorageService } from '../../shared/audio/audio-storage.service';
 import { GroqAudioService } from '../../shared/audio/groq-audio.service';
+import { CandidateStatus, toCandidateStatus } from '../candidate-status.util';
 import {
   BASE_QUESTION_COUNT,
   COMPOSITE_SCORE_WEIGHTS,
@@ -50,6 +51,8 @@ export interface InterviewResultView {
 
 export interface InterviewStatusView {
   applicationStatus: string;
+  /** Closed 7-value candidate-facing badge — see candidate-status.util.ts. */
+  candidateStatus: CandidateStatus;
   message: string;
   interviewDeadline?: Date;
   currentQuestion?: InterviewTurnView;
@@ -85,7 +88,27 @@ const rejectionPlainMessage =
   "Thank you for applying. After careful review, we've decided not to move forward with your application at this time.";
 
 const interviewSubmittedMessage =
-  'Your interview was submitted successfully. Our team will review your responses and let you know if you are eligible to move forward.';
+  'Your interview has been completed and is under review.';
+
+// After the interview finishes, the application keeps moving (manager
+// review, then a final decision) but the AI session itself stays
+// COMPLETED — so this picks the message off the current application
+// status instead of freezing on the interview-just-finished text.
+const postInterviewMessage = (applicationStatus: string): string => {
+  switch (applicationStatus) {
+    case 'MANAGER_REVIEW':
+      return 'Your interview is complete and your application is in final review.';
+    case 'SELECTED':
+    case 'HIRED':
+      return "Congratulations — you've been selected for this position. Our team will be in touch shortly with next steps.";
+    case 'NEXT_ROUND':
+      return "You've been invited to a further interview round. Please check your email for details.";
+    case 'REJECTED':
+      return "Thank you for the time and effort you invested throughout the interview process. After careful consideration, we've decided not to move forward with your application.";
+    default:
+      return interviewSubmittedMessage;
+  }
+};
 
 @Injectable()
 export class InterviewSessionService {
@@ -260,6 +283,7 @@ export class InterviewSessionService {
       if (application.status === 'SCREENING_REJECTED') {
         return {
           applicationStatus: application.status,
+          candidateStatus: toCandidateStatus(application.status),
           message: rejectionPlainMessage,
         };
       }
@@ -269,6 +293,7 @@ export class InterviewSessionService {
       if (application.candidateProfile.cvStatus === 'FAILED') {
         return {
           applicationStatus: application.status,
+          candidateStatus: toCandidateStatus(application.status),
           message:
             'We had trouble reading your CV, so we could not complete your application. Please try uploading it again — a clearer scan or a text-based PDF usually resolves this.',
           terminal: true,
@@ -276,6 +301,7 @@ export class InterviewSessionService {
       }
       return {
         applicationStatus: application.status,
+        candidateStatus: toCandidateStatus(application.status),
         message: 'Your application is still being reviewed.',
       };
     }
@@ -284,6 +310,7 @@ export class InterviewSessionService {
     if (await this.expireIfNeeded(session, applicationId)) {
       return {
         applicationStatus: 'INTERVIEW_EXPIRED',
+        candidateStatus: toCandidateStatus('INTERVIEW_EXPIRED'),
         message:
           'The window to complete your technical interview has expired. Please contact us if you believe this is a mistake.',
       };
@@ -293,6 +320,7 @@ export class InterviewSessionService {
       case 'PENDING':
         return {
           applicationStatus: application.status,
+          candidateStatus: toCandidateStatus(application.status),
           message: invitePlainMessage(session.windowExpiresAt),
           interviewDeadline: session.windowExpiresAt,
         };
@@ -300,6 +328,7 @@ export class InterviewSessionService {
         const pending = session.questions.find((q) => !q.answeredAt);
         return {
           applicationStatus: application.status,
+          candidateStatus: toCandidateStatus(application.status),
           message: 'Your technical interview is in progress.',
           currentQuestion: pending ? this.toTurnView(pending) : undefined,
         };
@@ -307,12 +336,14 @@ export class InterviewSessionService {
       case 'COMPLETED':
         return {
           applicationStatus: application.status,
-          message: interviewSubmittedMessage,
+          candidateStatus: toCandidateStatus(application.status),
+          message: postInterviewMessage(application.status),
           result: { status: 'COMPLETED', message: interviewSubmittedMessage },
         };
       default:
         return {
           applicationStatus: application.status,
+          candidateStatus: toCandidateStatus(application.status),
           message: 'This interview is no longer active.',
         };
     }

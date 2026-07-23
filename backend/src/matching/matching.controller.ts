@@ -1,10 +1,18 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  Query,
+  StreamableFile,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiOperation,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { CvStorageService } from '../candidates/services/cv-storage.service';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { JobAssignmentGuard } from '../auth/guards/job-assignment.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -14,10 +22,12 @@ import { MatchResultView, MatchingService } from './matching.service';
 import { RankedCandidate, RankingService } from './ranking.service';
 
 /**
- * Read-only, scored view of candidates for a job posting. Hiring Managers
- * can't use the LLM assistant, so this is their plain REST surface onto the
- * same RankingService/MatchingService the assistant's tools already call —
- * no new business logic, just re-exposure with JobAssignmentGuard scoping.
+ * Read-only, scored view of candidates for a job posting, plus the
+ * authenticated CV download. Hiring Managers can't use the LLM assistant,
+ * so this is their plain REST surface onto the same RankingService/
+ * MatchingService the assistant's tools already call. Same JobAssignmentGuard
+ * scoping as everything else here — HR_ADMIN/SUPER_ADMIN reach every
+ * candidate's CV, HIRING_MANAGER only those on jobs they're assigned to.
  */
 @ApiTags('matching')
 @ApiBearerAuth()
@@ -28,6 +38,7 @@ export class MatchingController {
   constructor(
     private readonly ranking: RankingService,
     private readonly matching: MatchingService,
+    private readonly cvStorage: CvStorageService,
   ) {}
 
   @Get()
@@ -58,5 +69,25 @@ export class MatchingController {
     @Param('candidateId') candidateId: string,
   ): Promise<MatchResultView> {
     return this.matching.getLatestExplanation(candidateId, jobPostingId);
+  }
+
+  // jobPostingId isn't needed as a handler argument — JobAssignmentGuard
+  // already reads it straight off the route to scope HIRING_MANAGER access
+  // before this runs.
+  @Get(':candidateId/cv')
+  @ApiOperation({
+    summary: "Download the candidate's original CV (PDF).",
+  })
+  @ApiResponse({ status: 200 })
+  async downloadCv(
+    @Param('candidateId') candidateId: string,
+  ): Promise<StreamableFile> {
+    const { filePath, displayName } =
+      await this.matching.getResumeFile(candidateId);
+    const buffer = await this.cvStorage.read(filePath);
+    return new StreamableFile(buffer, {
+      type: 'application/pdf',
+      disposition: `attachment; filename="${displayName}"`,
+    });
   }
 }

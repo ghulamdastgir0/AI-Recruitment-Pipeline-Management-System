@@ -1,102 +1,155 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+
+// Tunable knobs for the silence-based auto-submit behavior.
+const SILENCE_THRESHOLD = 0.02; // RMS amplitude below this counts as silence
+const SILENCE_MS = 10_000;
+const MAX_TURN_MS = 120_000; // safety cap if the candidate never pauses
+const COUNTDOWN_WARN_MS = 5_000; // show the countdown once this close to auto-submit
 
 /**
- * Records a single spoken answer via the browser mic (MediaRecorder,
- * webm/opus — satisfies the backend's `/^audio\//` mimetype validator).
- * Lets the user preview and re-record before submitting, since a silent or
- * failed recording is easy to produce by accident.
+ * Hands-free answer capture: while `active`, continuously records from the
+ * shared mic `stream` and watches its volume via the Web Audio API. Once the
+ * candidate has been silent for SILENCE_MS, it stops the recording and hands
+ * the clip to `onAutoSubmit` — no manual Start/Stop/Submit clicks. A "Submit
+ * now" button lets a candidate who finishes early skip the rest of the wait.
  */
 export function AudioRecorder({
-  onSubmit,
-  disabled,
+  stream,
+  active,
+  onAutoSubmit,
 }: {
-  onSubmit: (blob: Blob) => void;
-  disabled?: boolean;
+  stream: MediaStream | null;
+  active: boolean;
+  onAutoSubmit: (blob: Blob) => void;
 }) {
-  const [recording, setRecording] = useState(false);
-  const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [silenceMs, setSilenceMs] = useState(0);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const streamRef = useRef<MediaStream | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const lastSpeechAtRef = useRef(0);
+  const turnStartAtRef = useRef(0);
+  const submittedRef = useRef(false);
 
-  async function startRecording() {
-    setError(null);
-    setRecordedBlob(null);
+  useEffect(() => {
+    if (!active || !stream) return;
+
+    submittedRef.current = false;
+
+    let recorder: MediaRecorder;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      chunksRef.current = [];
-      const recorder = new MediaRecorder(stream);
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunksRef.current.push(event.data);
-      };
-      recorder.onstop = () => {
-        setRecordedBlob(new Blob(chunksRef.current, { type: recorder.mimeType }));
-        stream.getTracks().forEach((track) => track.stop());
-      };
-      recorder.start();
-      recorderRef.current = recorder;
-      setRecording(true);
+      recorder = new MediaRecorder(stream);
     } catch {
-      setError(
-        "Could not access the microphone. Check your browser's permission prompt.",
-      );
+      // Deferred: effects must not call setState synchronously in their own
+      // body (react-hooks/set-state-in-effect) — a microtask moves it just
+      // outside that window without any perceptible delay.
+      queueMicrotask(() => setError("This browser can't record audio."));
+      return;
     }
-  }
+    chunksRef.current = [];
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) chunksRef.current.push(event.data);
+    };
 
-  function stopRecording() {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new AudioContext();
+    }
+    const audioCtx = audioCtxRef.current;
+    const source = audioCtx.createMediaStreamSource(stream);
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    source.connect(analyser);
+    const buffer = new Uint8Array(analyser.fftSize);
+
+    const now = performance.now();
+    lastSpeechAtRef.current = now;
+    turnStartAtRef.current = now;
+
+    recorder.onstop = () => {
+      source.disconnect();
+      onAutoSubmit(new Blob(chunksRef.current, { type: recorder.mimeType }));
+    };
+
+    function stopAndSubmit() {
+      if (submittedRef.current) return;
+      submittedRef.current = true;
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      recorder.stop();
+    }
+
+    function tick() {
+      analyser.getByteTimeDomainData(buffer);
+      let sumSquares = 0;
+      for (let i = 0; i < buffer.length; i++) {
+        const normalized = (buffer[i] - 128) / 128;
+        sumSquares += normalized * normalized;
+      }
+      const rms = Math.sqrt(sumSquares / buffer.length);
+      const nowTs = performance.now();
+      if (rms > SILENCE_THRESHOLD) {
+        lastSpeechAtRef.current = nowTs;
+      }
+      const silenceDuration = nowTs - lastSpeechAtRef.current;
+      setSilenceMs(silenceDuration);
+
+      if (
+        silenceDuration >= SILENCE_MS ||
+        nowTs - turnStartAtRef.current >= MAX_TURN_MS
+      ) {
+        stopAndSubmit();
+        return;
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    }
+
+    recorderRef.current = recorder;
+    recorder.start(250);
+    rafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      if (recorder.state !== "inactive") {
+        recorder.onstop = null;
+        recorder.stop();
+      }
+      source.disconnect();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onAutoSubmit is stable per render, re-running on it would restart the recorder mid-turn
+  }, [active, stream]);
+
+  function submitNow() {
+    if (submittedRef.current) return;
+    submittedRef.current = true;
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     recorderRef.current?.stop();
-    setRecording(false);
   }
 
-  function reset() {
-    setRecordedBlob(null);
-    setError(null);
-  }
+  if (!active) return null;
+
+  const secondsLeft = Math.max(0, Math.ceil((SILENCE_MS - silenceMs) / 1000));
+  const showCountdown = silenceMs >= SILENCE_MS - COUNTDOWN_WARN_MS;
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-gray-200 p-4">
       {error && <p className="text-sm text-red-600">{error}</p>}
-
-      {!recordedBlob && (
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={recording ? stopRecording : startRecording}
-          className={`rounded px-4 py-2 text-sm font-medium text-white disabled:opacity-50 ${
-            recording ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"
-          }`}
-        >
-          {recording ? "Stop Recording" : "Start Recording"}
-        </button>
-      )}
-
-      {recordedBlob && (
-        <div className="flex flex-col gap-2">
-          <audio controls src={URL.createObjectURL(recordedBlob)} />
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => onSubmit(recordedBlob)}
-              className="rounded bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
-            >
-              Submit Answer
-            </button>
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={reset}
-              className="rounded border border-gray-300 px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
-            >
-              Re-record
-            </button>
-          </div>
-        </div>
-      )}
+      <div className="flex items-center gap-2">
+        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" />
+        <p className="text-sm text-gray-600">
+          {showCountdown
+            ? `Listening… submitting in ${secondsLeft}s`
+            : "Listening…"}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={submitNow}
+        className="self-start rounded bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700"
+      >
+        Submit now
+      </button>
     </div>
   );
 }

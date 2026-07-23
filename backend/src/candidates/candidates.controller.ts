@@ -20,7 +20,7 @@ import {
 } from '@nestjs/swagger';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { memoryStorage } from 'multer';
-import { UploadCvDto } from './dto/upload-cv.dto';
+import { PublicUploadCvDto } from './dto/public-upload-cv.dto';
 import {
   CandidateProcessingStatus,
   CvUploadService,
@@ -60,12 +60,21 @@ export class CandidatesController {
   @ApiBody({
     schema: {
       type: 'object',
-      required: ['jobPostingId', 'file'],
+      required: [
+        'jobPostingId',
+        'candidateName',
+        'candidateEmail',
+        'candidatePhone',
+        'file',
+      ],
       properties: {
         jobPostingId: {
           type: 'string',
           description: 'Id of the job posting this CV is being submitted for.',
         },
+        candidateName: { type: 'string' },
+        candidateEmail: { type: 'string' },
+        candidatePhone: { type: 'string' },
         file: { type: 'string', format: 'binary' },
       },
     },
@@ -77,10 +86,20 @@ export class CandidatesController {
     }),
   )
   async upload(
-    @Body() body: UploadCvDto,
+    @Body() body: PublicUploadCvDto,
     @UploadedFile(pdfFileValidationPipe) file: Express.Multer.File,
   ): Promise<UploadCvResult> {
-    return this.cvUpload.uploadCv(body.jobPostingId, file, 'SELF_APPLIED');
+    return this.cvUpload.uploadCv(
+      body.jobPostingId,
+      file,
+      'SELF_APPLIED',
+      undefined,
+      {
+        name: body.candidateName,
+        email: body.candidateEmail,
+        phone: body.candidatePhone,
+      },
+    );
   }
 
   @Get(':id/status')

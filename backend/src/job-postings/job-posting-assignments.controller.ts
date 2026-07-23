@@ -25,7 +25,13 @@ import {
   JobPostingAssignmentsService,
 } from './job-posting-assignments.service';
 
-/** Assigning Hiring Managers to job postings — a Super-Admin-only permission ("Assign Hiring Managers to job postings" appears only under SUPER_ADMIN). */
+/**
+ * Assigning Hiring Managers to job postings — HR's required step between
+ * creating a DRAFT posting and publishing it (JobPostingsService.publish()
+ * blocks publish with zero assignments). Available to SUPER_ADMIN and
+ * HR_ADMIN, matching the workflow: "HR Admin creates job posting → HR Admin
+ * selects at least one Hiring Manager → ... → HR Admin publishes."
+ */
 @ApiTags('job-posting-assignments')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -34,7 +40,7 @@ export class JobPostingAssignmentsController {
   constructor(private readonly assignments: JobPostingAssignmentsService) {}
 
   @Post()
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'HR_ADMIN')
   @ApiOperation({ summary: 'Assign a Hiring Manager to a job posting.' })
   @ApiResponse({ status: 201, type: HiringManagerAssignmentResponseDto })
   async assign(
@@ -50,7 +56,7 @@ export class JobPostingAssignmentsController {
   }
 
   @Delete(':hiringManagerUserId')
-  @Roles('SUPER_ADMIN')
+  @Roles('SUPER_ADMIN', 'HR_ADMIN')
   @ApiOperation({ summary: 'Unassign a Hiring Manager from a job posting.' })
   @ApiResponse({ status: 200 })
   async unassign(

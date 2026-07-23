@@ -18,6 +18,12 @@ export interface UploadedCv {
 
 export type CandidateCvSource = 'HR_SOURCED' | 'SELF_APPLIED';
 
+export interface CandidateContact {
+  name: string;
+  email: string;
+  phone: string;
+}
+
 export interface UploadCvResult {
   candidateProfileId: string;
   applicationId: string;
@@ -59,6 +65,7 @@ export class CvUploadService {
     file: UploadedCv,
     source: CandidateCvSource,
     uploadedByUserId?: string,
+    contact?: CandidateContact,
   ): Promise<UploadCvResult> {
     this.assertIsPdf(file);
 
@@ -92,9 +99,25 @@ export class CvUploadService {
           resumeContentHash: contentHash,
           source,
           cvStatus: 'PROCESSING',
+          candidateName: contact?.name,
+          candidateEmail: contact?.email,
+          candidatePhone: contact?.phone,
         },
       });
       this.jobQueue.enqueue(() => this.processor.process(profile!.id));
+    } else if (contact) {
+      // Dedupe-reuse path: the same CV bytes were already on file for this
+      // profile, so no create() ran above to persist contact info — a
+      // returning applicant's freshly-typed details should still win over
+      // whatever (or nothing) was recorded before.
+      profile = await this.prisma.candidateProfile.update({
+        where: { id: profile.id },
+        data: {
+          candidateName: contact.name,
+          candidateEmail: contact.email,
+          candidatePhone: contact.phone,
+        },
+      });
     }
 
     const application = await this.prisma.application.upsert({

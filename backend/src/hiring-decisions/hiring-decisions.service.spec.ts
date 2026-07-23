@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { AuditLogService } from '../audit/audit-log.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../shared/email/email.service';
@@ -143,5 +143,59 @@ describe('HiringDecisionsService', () => {
 
     expect(result.emailSent).toBe(false);
     expect(prisma.emailLog.create).not.toHaveBeenCalled();
+  });
+
+  describe('moveToManagerReview', () => {
+    it('throws NotFoundException when no application exists for the candidate/job pair', async () => {
+      const { service, prisma } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.moveToManagerReview('cand-1', 'job-1', 'hr-1'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('throws ConflictException when the application is not IN_REVIEW', async () => {
+      const { service, prisma } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        id: 'app-1',
+        status: 'INTERVIEW_PENDING',
+      });
+
+      await expect(
+        service.moveToManagerReview('cand-1', 'job-1', 'hr-1'),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.application.update).not.toHaveBeenCalled();
+    });
+
+    it('moves an IN_REVIEW application to MANAGER_REVIEW and audit-logs it', async () => {
+      const { service, prisma, audit } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        id: 'app-1',
+        status: 'IN_REVIEW',
+      });
+
+      const result = await service.moveToManagerReview(
+        'cand-1',
+        'job-1',
+        'hr-1',
+      );
+
+      expect(result).toEqual({
+        applicationId: 'app-1',
+        status: 'MANAGER_REVIEW',
+      });
+      expect(prisma.application.update).toHaveBeenCalledWith({
+        where: { id: 'app-1' },
+        data: { status: 'MANAGER_REVIEW' },
+      });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorUserId: 'hr-1',
+          action: 'application.moved_to_manager_review',
+          resourceId: 'app-1',
+        }),
+      );
+    });
   });
 });

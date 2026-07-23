@@ -1,8 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
+import { EmptyState, ErrorState, LoadingState } from "@/components/AsyncState";
 import { RoleGuard } from "@/components/RoleGuard";
+import { StaffNav } from "@/components/StaffNav";
+import { InternalStatusBadge } from "@/components/StatusBadge";
 import { apiFetch, ApiError, postJson } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 
@@ -15,7 +19,11 @@ interface JobPosting {
   workModel?: string | null;
 }
 
-function CreateJobForm({ onCreated }: { onCreated: () => void }) {
+interface CreatedJob {
+  id: string;
+}
+
+function CreateJobForm({ onCreated }: { onCreated: (jobId: string) => void }) {
   const [form, setForm] = useState({
     title: "",
     rawPrompt: "",
@@ -34,7 +42,7 @@ function CreateJobForm({ onCreated }: { onCreated: () => void }) {
     setSubmitting(true);
     setError(null);
     try {
-      await postJson("/job-postings", {
+      const created = await postJson<CreatedJob>("/job-postings", {
         title: form.title,
         rawPrompt: form.rawPrompt,
         requiredSkills: form.requiredSkills
@@ -48,7 +56,7 @@ function CreateJobForm({ onCreated }: { onCreated: () => void }) {
         deadline: new Date(form.deadline).toISOString(),
         location: form.location || undefined,
       });
-      onCreated();
+      onCreated(created.id);
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : "Failed to create job posting.",
@@ -136,100 +144,78 @@ function CreateJobForm({ onCreated }: { onCreated: () => void }) {
 }
 
 function StaffDashboard() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
+  const router = useRouter();
   const [jobs, setJobs] = useState<JobPosting[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
 
-  function load() {
+  useEffect(() => {
     apiFetch<JobPosting[]>("/job-postings")
       .then(setJobs)
       .catch((err) =>
         setError(err instanceof ApiError ? err.message : "Failed to load jobs."),
       );
-  }
-
-  useEffect(() => {
-    load();
   }, []);
-
-  async function publish(id: string) {
-    try {
-      await postJson(`/job-postings/${id}/publish`, {});
-      load();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Publish failed.");
-    }
-  }
 
   const canManage = user?.role === "SUPER_ADMIN" || user?.role === "HR_ADMIN";
 
   return (
-    <main className="mx-auto w-full max-w-3xl p-6">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Job Postings</h1>
-          <p className="text-sm text-gray-500">
-            Signed in as {user?.email} ({user?.role})
-          </p>
-        </div>
-        <button onClick={logout} className="text-sm text-blue-600 underline">
-          Sign out
-        </button>
-      </div>
+    <>
+      <StaffNav />
+      <main className="mx-auto w-full max-w-3xl p-6">
+        <h1 className="text-2xl font-bold">
+          {canManage ? "Job Postings" : "My Assigned Job Postings"}
+        </h1>
 
-      {error && <p className="mb-4 text-red-600">{error}</p>}
+        {error && <ErrorState message={error} />}
 
-      {canManage && (
-        <div className="mb-6">
-          <button
-            onClick={() => setShowCreate((v) => !v)}
-            className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-          >
-            {showCreate ? "Cancel" : "New Job Posting"}
-          </button>
-          {showCreate && (
-            <CreateJobForm
-              onCreated={() => {
-                setShowCreate(false);
-                load();
-              }}
-            />
-          )}
-        </div>
-      )}
-
-      <ul className="flex flex-col gap-3">
-        {jobs?.map((job) => (
-          <li key={job.id} className="rounded-lg border border-gray-200 p-4">
-            <div className="flex items-center justify-between">
-              <Link
-                href={`/staff/jobs/${job.id}`}
-                className="text-lg font-semibold text-blue-700 hover:underline"
-              >
-                {job.title}
-              </Link>
-              <span className="rounded bg-gray-100 px-2 py-1 text-xs">
-                {job.status}
-              </span>
-            </div>
-            <p className="mt-1 text-sm text-gray-500">
-              {[job.location, job.seniority, job.workModel]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-            {canManage && job.status === "DRAFT" && (
-              <button
-                onClick={() => publish(job.id)}
-                className="mt-2 rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700"
-              >
-                Publish
-              </button>
+        {canManage && (
+          <div className="my-6">
+            <button
+              onClick={() => setShowCreate((v) => !v)}
+              className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              {showCreate ? "Cancel" : "New Job Posting"}
+            </button>
+            {showCreate && (
+              <CreateJobForm
+                onCreated={(jobId) => {
+                  setShowCreate(false);
+                  router.push(`/staff/jobs/${jobId}`);
+                }}
+              />
             )}
-          </li>
-        ))}
-      </ul>
-    </main>
+          </div>
+        )}
+
+        {jobs === null && !error && <LoadingState />}
+        {jobs?.length === 0 && (
+          <EmptyState label="No job postings to show yet." />
+        )}
+
+        <ul className="mt-6 flex flex-col gap-3">
+          {jobs?.map((job) => (
+            <li key={job.id} className="rounded-lg border border-gray-200 p-4">
+              <div className="flex items-center justify-between">
+                <Link
+                  href={`/staff/jobs/${job.id}`}
+                  className="text-lg font-semibold text-blue-700 hover:underline"
+                >
+                  {job.title}
+                </Link>
+                <InternalStatusBadge status={job.status} />
+              </div>
+              <p className="mt-1 text-sm text-gray-500">
+                {[job.location, job.seniority, job.workModel]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            </li>
+          ))}
+        </ul>
+      </main>
+    </>
   );
 }
 

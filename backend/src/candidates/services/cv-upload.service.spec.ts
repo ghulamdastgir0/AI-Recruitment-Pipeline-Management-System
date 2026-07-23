@@ -12,7 +12,11 @@ const PDF_BYTES = Buffer.from('%PDF-1.4 fake pdf content');
 function buildService() {
   const prisma = {
     job: { findUnique: jest.fn() },
-    candidateProfile: { findFirst: jest.fn(), create: jest.fn() },
+    candidateProfile: {
+      findFirst: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+    },
     application: { upsert: jest.fn() },
   } as unknown as jest.Mocked<PrismaService>;
   const storage = {
@@ -143,6 +147,110 @@ describe('CvUploadService', () => {
       );
       // No authenticated actor -> nothing valid to attribute an audit row to.
       expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('persists candidate-supplied contact info on a fresh profile', async () => {
+      const { service, prisma } = buildService();
+      (prisma.job.findUnique as jest.Mock).mockResolvedValue({
+        id: 'job-1',
+        status: 'PUBLISHED',
+      });
+      (prisma.candidateProfile.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.candidateProfile.create as jest.Mock).mockResolvedValue({
+        id: 'cand-1',
+        cvStatus: 'PROCESSING',
+      });
+      (prisma.application.upsert as jest.Mock).mockResolvedValue({
+        id: 'app-1',
+      });
+
+      await service.uploadCv(
+        'job-1',
+        { buffer: PDF_BYTES, originalname: 'resume.pdf' },
+        'SELF_APPLIED',
+        undefined,
+        {
+          name: 'Jane Candidate',
+          email: 'jane@example.com',
+          phone: '555-0100',
+        },
+      );
+
+      expect(prisma.candidateProfile.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            candidateName: 'Jane Candidate',
+            candidateEmail: 'jane@example.com',
+            candidatePhone: '555-0100',
+          }),
+        }),
+      );
+      expect(prisma.candidateProfile.update).not.toHaveBeenCalled();
+    });
+
+    it('overwrites contact info on a content-hash-deduped reused profile', async () => {
+      const { service, prisma } = buildService();
+      (prisma.job.findUnique as jest.Mock).mockResolvedValue({
+        id: 'job-1',
+        status: 'PUBLISHED',
+      });
+      (prisma.candidateProfile.findFirst as jest.Mock).mockResolvedValue({
+        id: 'cand-1',
+        cvStatus: 'READY',
+      });
+      (prisma.candidateProfile.update as jest.Mock).mockResolvedValue({
+        id: 'cand-1',
+        cvStatus: 'READY',
+      });
+      (prisma.application.upsert as jest.Mock).mockResolvedValue({
+        id: 'app-1',
+      });
+
+      await service.uploadCv(
+        'job-1',
+        { buffer: PDF_BYTES, originalname: 'resume.pdf' },
+        'SELF_APPLIED',
+        undefined,
+        {
+          name: 'Jane Candidate',
+          email: 'jane@example.com',
+          phone: '555-0100',
+        },
+      );
+
+      expect(prisma.candidateProfile.create).not.toHaveBeenCalled();
+      expect(prisma.candidateProfile.update).toHaveBeenCalledWith({
+        where: { id: 'cand-1' },
+        data: {
+          candidateName: 'Jane Candidate',
+          candidateEmail: 'jane@example.com',
+          candidatePhone: '555-0100',
+        },
+      });
+    });
+
+    it('does not touch candidateProfile.update when no contact info is supplied (HR-sourced path)', async () => {
+      const { service, prisma } = buildService();
+      (prisma.job.findUnique as jest.Mock).mockResolvedValue({
+        id: 'job-1',
+        status: 'DRAFT',
+      });
+      (prisma.candidateProfile.findFirst as jest.Mock).mockResolvedValue({
+        id: 'cand-1',
+        cvStatus: 'READY',
+      });
+      (prisma.application.upsert as jest.Mock).mockResolvedValue({
+        id: 'app-1',
+      });
+
+      await service.uploadCv(
+        'job-1',
+        { buffer: PDF_BYTES, originalname: 'resume.pdf' },
+        'HR_SOURCED',
+        'hr-user-1',
+      );
+
+      expect(prisma.candidateProfile.update).not.toHaveBeenCalled();
     });
 
     it('audit-logs only when uploadedByUserId is provided', async () => {

@@ -135,6 +135,44 @@ describe('InterviewOrchestratorService', () => {
 
       expect(result).toEqual({ complete: true });
     });
+
+    it('loops back through the graph across two failures before succeeding on the third attempt', async () => {
+      const { service, llm } = buildService();
+      llm.chat
+        .mockResolvedValueOnce({
+          message: { role: 'assistant', content: 'not json' },
+          finishReason: 'stop',
+        })
+        .mockResolvedValueOnce({
+          message: { role: 'assistant', content: '{}' },
+          finishReason: 'stop',
+        })
+        .mockResolvedValueOnce(
+          chatResult({
+            complete: false,
+            questionText: 'Explain optimistic locking.',
+            expectedCore: 'Version check on write, retry on conflict',
+            targetSkillName: 'Databases',
+            isFollowUp: false,
+          }),
+        );
+
+      const result = await service.nextTurn({
+        jobTitle: 'Backend Engineer',
+        requiredSkills: [],
+        preferredSkills: [],
+        candidateSkills: [],
+        transcript: [],
+        canAskFresh: true,
+        canFollowUp: false,
+      });
+
+      expect(llm.chat).toHaveBeenCalledTimes(3);
+      expect(result).toMatchObject({
+        complete: false,
+        targetSkillName: 'Databases',
+      });
+    });
   });
 
   describe('grade', () => {
@@ -201,6 +239,35 @@ describe('InterviewOrchestratorService', () => {
 
       expect(result.overallScore).toBe(100);
       expect(result.skills[0].proficiencyScore).toBe(0);
+    });
+
+    it('retries once on an invalid shape and succeeds on the next attempt', async () => {
+      const { service, llm } = buildService();
+      llm.chat
+        .mockResolvedValueOnce({
+          message: { role: 'assistant', content: '{}' },
+          finishReason: 'stop',
+        })
+        .mockResolvedValueOnce(
+          chatResult({
+            overallScore: 70,
+            skills: [
+              {
+                skillName: 'JavaScript',
+                proficiencyScore: 70,
+                justification: 'Solid understanding overall.',
+              },
+            ],
+          }),
+        );
+
+      const result = await service.grade({
+        jobTitle: 'Backend Engineer',
+        skillGroups: [{ skillName: 'JavaScript', entries: [] }],
+      });
+
+      expect(llm.chat).toHaveBeenCalledTimes(2);
+      expect(result.overallScore).toBe(70);
     });
 
     it('throws after exhausting retries on persistently invalid output', async () => {

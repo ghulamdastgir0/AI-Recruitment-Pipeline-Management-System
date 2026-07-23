@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { resolveCandidateIdentity } from '../candidates/candidate-identity.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmClientService } from '../shared/llm/llm-client.service';
 
@@ -12,6 +13,7 @@ export interface RankedCandidate {
   recommendation: string | null;
   confidence: string | null;
   summary: string;
+  missingRequiredSkills: string[];
   processedAt: Date | null;
 }
 
@@ -62,27 +64,29 @@ export class RankingService {
     // HR's perspective and shouldn't silently vanish from the list.
     let ranked: RankedCandidate[] = applications
       .map((app) => {
-        const extracted = app.candidateProfile.extractedDataJson as {
-          name?: string;
-        } | null;
+        const { name: candidateName } = resolveCandidateIdentity(
+          app.candidateProfile,
+        );
         const latest = app.matchResults[0];
         if (latest) {
           return {
             applicationId: app.id,
             candidateProfileId: app.candidateProfileId,
-            candidateName: extracted?.name ?? null,
+            candidateName,
             applicationStatus: app.status,
             overallScore: Number(latest.overallScore),
             recommendation: latest.recommendation,
             confidence: latest.confidence,
             summary: latest.summary,
+            missingRequiredSkills:
+              (latest.missingRequiredSkillsJson as string[] | null) ?? [],
             processedAt: latest.processedAt,
           };
         }
         return {
           applicationId: app.id,
           candidateProfileId: app.candidateProfileId,
-          candidateName: extracted?.name ?? null,
+          candidateName,
           applicationStatus: app.status,
           overallScore: null,
           recommendation: null,
@@ -91,6 +95,7 @@ export class RankingService {
             app.candidateProfile.cvStatus,
             app.candidateProfile.cvProcessingError,
           ),
+          missingRequiredSkills: [],
           processedAt: null,
         };
       })

@@ -58,6 +58,42 @@ export function postJson<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
+export function deleteRequest<T>(path: string): Promise<T> {
+  return apiFetch<T>(path, { method: "DELETE" });
+}
+
 export function apiFileUrl(path: string): string {
   return `${API_BASE_URL}${path}`;
+}
+
+export function isForbidden(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 403;
+}
+
+/**
+ * apiFileUrl (plain URL concat) can't carry the stored JWT, so it only
+ * works for genuinely public files (interview question audio). Staff
+ * downloads (CVs) are behind JwtAuthGuard — fetch the bytes with the auth
+ * header attached, then trigger a normal browser save via an object URL.
+ */
+export async function downloadFile(
+  path: string,
+  filename: string,
+): Promise<void> {
+  const headers = new Headers();
+  if (typeof window !== "undefined") {
+    const token = window.localStorage.getItem("token");
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+  }
+  const response = await fetch(`${API_BASE_URL}${path}`, { headers });
+  if (!response.ok) {
+    throw new ApiError(response.status, `Download failed (${response.status})`);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }

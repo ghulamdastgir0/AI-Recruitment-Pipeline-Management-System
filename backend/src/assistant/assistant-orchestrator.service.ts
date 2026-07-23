@@ -1,6 +1,7 @@
 import {
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { AuditLogService } from '../audit/audit-log.service';
@@ -31,6 +32,7 @@ export interface AssistantReply {
 
 const MAX_TOOL_ITERATIONS = 5;
 const PENDING_ACTION_TTL_MINUTES = 30;
+const RETRY_DELAY_MS = 1500;
 
 /**
  * The tool-calling loop. The LLM never touches the DB/filesystem — it only
@@ -41,6 +43,8 @@ const PENDING_ACTION_TTL_MINUTES = 30;
  */
 @Injectable()
 export class AssistantOrchestratorService {
+  private readonly logger = new Logger(AssistantOrchestratorService.name);
+
   constructor(
     private readonly llm: LlmClientService,
     private readonly toolRegistry: ToolRegistryService,
@@ -64,9 +68,14 @@ export class AssistantOrchestratorService {
     ];
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-      const { message } = await this.llm.chat(messages, {
-        tools: ASSISTANT_TOOLS,
-      });
+      let message: ChatMessage;
+      try {
+        message = await this.chatWithRetry(messages);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`LLM call failed: ${reason}`);
+        return { reply: describeLlmFailure(reason) };
+      }
 
       if (!message.tool_calls || message.tool_calls.length === 0) {
         return { reply: message.content ?? '' };
@@ -195,6 +204,29 @@ export class AssistantOrchestratorService {
     });
   }
 
+  /**
+   * One quiet retry for transient failures (network blip, a momentary 5xx)
+   * so a single hiccup doesn't surface as an error to HR. Skips the retry
+   * for rate limits — Groq's own backoff hint is on the order of several
+   * seconds, far longer than we should block a chat reply for, so retrying
+   * immediately would just fail again for no benefit.
+   */
+  private async chatWithRetry(messages: ChatMessage[]): Promise<ChatMessage> {
+    try {
+      return (await this.llm.chat(messages, { tools: ASSISTANT_TOOLS }))
+        .message;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      if (/rate_limit_exceeded|429/i.test(reason)) {
+        throw error;
+      }
+      this.logger.warn(`LLM call failed, retrying once: ${reason}`);
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+      return (await this.llm.chat(messages, { tools: ASSISTANT_TOOLS }))
+        .message;
+    }
+  }
+
   private async createPendingAction(
     tool: string,
     args: Record<string, unknown>,
@@ -213,6 +245,13 @@ export class AssistantOrchestratorService {
       },
     });
   }
+}
+
+function describeLlmFailure(reason: string): string {
+  if (/rate_limit_exceeded|429/i.test(reason)) {
+    return 'The assistant is temporarily rate-limited — please wait a few seconds and try again.';
+  }
+  return 'The assistant is temporarily unavailable — please try again in a moment.';
 }
 
 function describeAction(tool: string, args: Record<string, unknown>): string {

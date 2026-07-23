@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import type { ExtractedCvProfileDto } from '../../candidates/dto/extracted-cv-profile.dto';
+import { resolveCandidateIdentity } from '../../candidates/candidate-identity.util';
 import { INTERVIEW_REMINDER_DELAY_MINUTES } from '../../matching/matching.constants';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../../shared/email/email.service';
@@ -46,14 +46,14 @@ export class InterviewReminderService {
 
     for (const session of due) {
       const { application } = session;
-      const extracted = application.candidateProfile
-        .extractedDataJson as ExtractedCvProfileDto | null;
+      const { name: candidateName, email: candidateEmail } =
+        resolveCandidateIdentity(application.candidateProfile);
 
       const sent = await this.email.send({
-        to: extracted?.email ?? null,
+        to: candidateEmail,
         type: 'INTERVIEW_REMINDER',
         variables: {
-          candidateName: extracted?.name ?? null,
+          candidateName,
           jobTitle: application.job.title,
           interviewDeadline: session.windowExpiresAt,
           interviewLink: this.links.interviewUrl(application.id),

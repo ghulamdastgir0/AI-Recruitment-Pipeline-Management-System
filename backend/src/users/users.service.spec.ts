@@ -10,6 +10,7 @@ function buildService() {
   const prisma = {
     user: {
       findUnique: jest.fn(),
+      findMany: jest.fn(),
       create: jest.fn(),
       update: jest.fn(),
     },
@@ -182,6 +183,37 @@ describe('UsersService', () => {
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'user.removed' }),
       );
+    });
+  });
+
+  describe('listHiringManagers', () => {
+    it('queries only active HIRING_MANAGER users, selecting a minimal field set', async () => {
+      const { service, prisma } = buildService();
+      (prisma.user.findMany as jest.Mock).mockResolvedValue([
+        {
+          id: 'hm-1',
+          firstName: 'Manager',
+          lastName: 'User',
+          email: 'manager@example.com',
+        },
+      ]);
+
+      const result = await service.listHiringManagers();
+
+      expect(prisma.user.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { role: 'HIRING_MANAGER', isActive: true },
+          select: { id: true, firstName: true, lastName: true, email: true },
+        }),
+      );
+      expect(result).toEqual([
+        {
+          id: 'hm-1',
+          firstName: 'Manager',
+          lastName: 'User',
+          email: 'manager@example.com',
+        },
+      ]);
     });
   });
 });

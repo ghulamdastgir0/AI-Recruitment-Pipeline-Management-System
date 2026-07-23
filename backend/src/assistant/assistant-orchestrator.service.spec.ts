@@ -57,6 +57,52 @@ describe('AssistantOrchestratorService', () => {
       expect(result.pendingAction).toBeUndefined();
     });
 
+    it('returns a friendly reply instead of throwing when the LLM call fails', async () => {
+      const { orchestrator, llm } = buildOrchestrator();
+      llm.chat.mockRejectedValue(
+        new Error(
+          'Groq API error (429): {"error":{"type":"rate_limit_exceeded"}}',
+        ),
+      );
+
+      const result = await orchestrator.handleMessage(
+        [],
+        'create a job posting for a QA engineer',
+        'user-1',
+      );
+
+      expect(result.reply).toMatch(/rate-limited/i);
+      expect(result.pendingAction).toBeUndefined();
+      // Rate limits don't get the quiet retry — Groq's own backoff hint is
+      // several seconds, so retrying immediately would just fail again.
+      expect(llm.chat).toHaveBeenCalledTimes(1);
+    });
+
+    it('quietly retries once and succeeds after a transient (non-rate-limit) failure', async () => {
+      const { orchestrator, llm } = buildOrchestrator();
+      llm.chat
+        .mockRejectedValueOnce(new Error('fetch failed: network down'))
+        .mockResolvedValueOnce({
+          message: { role: 'assistant', content: 'All set.' },
+          finishReason: 'stop',
+        });
+
+      const result = await orchestrator.handleMessage([], 'hello', 'user-1');
+
+      expect(result.reply).toBe('All set.');
+      expect(llm.chat).toHaveBeenCalledTimes(2);
+    });
+
+    it('returns a generic unavailable reply for non-rate-limit LLM failures', async () => {
+      const { orchestrator, llm } = buildOrchestrator();
+      llm.chat.mockRejectedValue(new Error('fetch failed: network down'));
+
+      const result = await orchestrator.handleMessage([], 'hello', 'user-1');
+
+      expect(result.reply).toMatch(/temporarily unavailable/i);
+      expect(llm.chat).toHaveBeenCalledTimes(2);
+    });
+
     it('executes an ungated tool call and feeds the result back for a final answer', async () => {
       const { orchestrator, llm, toolRegistry } = buildOrchestrator();
       llm.chat

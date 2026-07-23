@@ -22,6 +22,13 @@ export interface UserView {
   createdAt: Date;
 }
 
+export interface HiringManagerOption {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+}
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -66,6 +73,20 @@ export class UsersService {
       orderBy: { createdAt: 'desc' },
     });
     return users.map(toView);
+  }
+
+  /**
+   * Least-privilege read for the job-posting Hiring-Manager-assignment
+   * picker — HR_ADMIN needs to see who's assignable without the full
+   * admin/users roster (other admins, deactivated accounts, etc.).
+   */
+  async listHiringManagers(): Promise<HiringManagerOption[]> {
+    const users = await this.prisma.user.findMany({
+      where: { role: 'HIRING_MANAGER', isActive: true },
+      orderBy: { firstName: 'asc' },
+      select: { id: true, firstName: true, lastName: true, email: true },
+    });
+    return users;
   }
 
   async getById(id: string): Promise<UserView> {

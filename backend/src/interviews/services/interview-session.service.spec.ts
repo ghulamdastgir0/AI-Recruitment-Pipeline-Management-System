@@ -404,5 +404,48 @@ describe('InterviewSessionService', () => {
       expect(status.terminal).toBeUndefined();
       expect(status.message).toMatch(/still being reviewed/i);
     });
+
+    function withCompletedSession(applicationStatus: string) {
+      const { service, prisma } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        id: 'app-1',
+        status: applicationStatus,
+        candidateProfile: { cvStatus: 'READY' },
+        interviewSession: {
+          id: 'session-1',
+          status: 'COMPLETED',
+          windowExpiresAt: inTheFuture,
+          questions: [],
+        },
+      });
+      return service.getStatus('app-1');
+    }
+
+    it('reports the interview-under-review message while the application is still IN_REVIEW', async () => {
+      const status = await withCompletedSession('IN_REVIEW');
+      expect(status.message).toBe(
+        'Your interview has been completed and is under review.',
+      );
+      expect(status.candidateStatus).toBe('INTERVIEW_COMPLETED');
+    });
+
+    it('does not freeze on the interview-completed message once the application moves to MANAGER_REVIEW', async () => {
+      const status = await withCompletedSession('MANAGER_REVIEW');
+      expect(status.message).not.toMatch(/under review$/);
+      expect(status.message).toMatch(/final review/i);
+      expect(status.candidateStatus).toBe('FINAL_REVIEW');
+    });
+
+    it('reports a selection message once the application is SELECTED', async () => {
+      const status = await withCompletedSession('SELECTED');
+      expect(status.message).toMatch(/selected/i);
+      expect(status.candidateStatus).toBe('ACCEPTED');
+    });
+
+    it('reports a rejection message once the application is REJECTED', async () => {
+      const status = await withCompletedSession('REJECTED');
+      expect(status.message).toMatch(/not to move forward/i);
+      expect(status.candidateStatus).toBe('REJECTED');
+    });
   });
 });

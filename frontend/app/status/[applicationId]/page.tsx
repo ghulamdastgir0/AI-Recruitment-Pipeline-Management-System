@@ -2,6 +2,8 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { CandidateStatusBadge } from "@/components/StatusBadge";
+import { LoadingState, ErrorState } from "@/components/AsyncState";
 import { apiFetch, ApiError } from "@/lib/api";
 
 const BASE_POLL_MS = 3000;
@@ -25,6 +27,7 @@ interface TurnView {
 
 interface StatusView {
   applicationStatus: string;
+  candidateStatus: string;
   message: string;
   interviewDeadline?: string;
   currentQuestion?: TurnView;
@@ -73,23 +76,25 @@ export default function StatusPage() {
 
   if (error) {
     return (
-      <main className="mx-auto w-full max-w-2xl p-6">
-        <p className="text-red-600">{error}</p>
+      <main className="mx-auto w-full max-w-lg p-6">
+        <ErrorState message={error} />
       </main>
     );
   }
   if (!status) {
     return (
-      <main className="mx-auto w-full max-w-2xl p-6">
-        <p className="text-gray-500">Loading…</p>
+      <main className="mx-auto w-full max-w-lg p-6">
+        <LoadingState />
       </main>
     );
   }
 
   return (
-    <main className="mx-auto w-full max-w-2xl p-6">
+    <main className="mx-auto w-full max-w-lg p-6">
       <h1 className="text-2xl font-bold">Application Status</h1>
-      <p className="mt-2 text-sm text-gray-500">Status: {status.applicationStatus}</p>
+      <div className="mt-3">
+        <CandidateStatusBadge status={status.candidateStatus} />
+      </div>
       <p className="mt-4">{status.message}</p>
       {status.applicationStatus === "APPLIED" && (
         <p className="mt-2 text-sm text-gray-400">
@@ -105,7 +110,6 @@ export default function StatusPage() {
           {status.currentQuestion ? "Resume Interview" : "Start Interview"}
         </button>
       )}
-
     </main>
   );
 }

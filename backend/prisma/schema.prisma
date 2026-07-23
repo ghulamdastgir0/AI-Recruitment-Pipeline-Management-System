@@ -53,6 +53,14 @@ model CandidateProfile {
   // for AI-assisted screening and never had the candidate register/apply.
   source CandidateSource @default(SELF_APPLIED)
 
+  // Candidate-supplied identity (collected directly on the public apply
+  // form) — the primary source of truth for name/email/phone everywhere in
+  // the system. Nullable for legacy rows and HR-sourced uploads, which fall
+  // back to extractedDataJson via resolveCandidateIdentity().
+  candidateName  String?
+  candidateEmail String?
+  candidatePhone String?
+
   resumeUrl         String
   resumeText        String? @db.Text
   // SHA-256 of the uploaded CV bytes — lets a CV re-uploaded against a
@@ -164,6 +172,10 @@ model Job {
   rawPrompt            String                      @db.Text
   generatedDescription String                      @db.Text
   description          String                      @db.Text
+  // Short, candidate-safe summary (role + high-level responsibilities only —
+  // never specific required skills/years/scoring criteria) shown on the
+  // public apply page instead of the full internal `description`.
+  candidateSummary     String?                     @db.Text
   embedding            Unsupported("vector(384)")?
 
   experienceMin Int
@@ -489,6 +501,9 @@ enum AppStatus {
   INTERVIEW_PENDING
   INTERVIEW_EXPIRED
   IN_REVIEW
+  // HR-explicit stage between the automatic post-interview IN_REVIEW and a
+  // final SELECTED/NEXT_ROUND/REJECTED decision — see HiringDecisionsService.moveToManagerReview().
+  MANAGER_REVIEW
   SELECTED
   NEXT_ROUND
   REJECTED

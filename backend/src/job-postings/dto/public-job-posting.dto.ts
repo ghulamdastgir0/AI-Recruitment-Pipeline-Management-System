@@ -2,16 +2,15 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
  * Slim, candidate-facing view of a published job posting — deliberately
- * excludes internal-only fields present on JobPostingResponseDto
- * (rawPrompt/generatedDescription/hiringTarget/hiredCount/createdByUserId).
+ * excludes internal-only fields (rawPrompt/generatedDescription/
+ * hiringTarget/hiredCount/createdByUserId) AND the internal `description`/
+ * requiredSkills/preferredSkills (ATS scoring criteria, not for candidates —
+ * see candidateSummary instead, a short LLM-drafted candidate-safe blurb).
  */
 export class PublicJobPostingDto {
   @ApiProperty() id!: string;
   @ApiProperty() title!: string;
-  @ApiProperty() description!: string;
-  @ApiProperty({ type: [String] }) requiredSkills!: string[];
-  @ApiProperty({ type: [String] }) preferredSkills!: string[];
-  @ApiProperty() experienceMin!: number;
+  @ApiPropertyOptional() candidateSummary?: string | null;
   @ApiPropertyOptional() salaryMax?: number | null;
   @ApiProperty() deadline!: Date;
   @ApiPropertyOptional() location?: string | null;

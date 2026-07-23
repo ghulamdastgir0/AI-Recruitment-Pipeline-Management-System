@@ -30,6 +30,10 @@ interface AnswerPayload {
 @WebSocketGateway({
   namespace: 'interviews',
   cors: { origin: process.env.CORS_ORIGIN ?? '*' },
+  // Default is 1MB — a spoken answer clip (webm/opus) is normally well under
+  // that, but silence detection now allows longer uninterrupted turns than
+  // the old manual stop-button flow did, so give it real headroom.
+  maxHttpBufferSize: 10 * 1024 * 1024,
 })
 export class InterviewGateway {
   constructor(private readonly sessions: InterviewSessionService) {}

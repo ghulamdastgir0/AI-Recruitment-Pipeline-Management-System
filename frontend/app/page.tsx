@@ -10,7 +10,11 @@ interface PublicJob {
   location?: string | null;
   seniority?: string | null;
   workModel?: string | null;
-  requiredSkills: string[];
+  candidateSummary?: string | null;
+}
+
+function previewOf(candidateSummary: string): string {
+  return candidateSummary.split(/\n{2,}/)[0]?.trim() ?? "";
 }
 
 export default function HomePage() {
@@ -54,9 +58,9 @@ export default function HomePage() {
                 .filter(Boolean)
                 .join(" · ")}
             </p>
-            {job.requiredSkills.length > 0 && (
-              <p className="mt-1 text-sm text-gray-500">
-                Skills: {job.requiredSkills.join(", ")}
+            {job.candidateSummary && (
+              <p className="mt-1 line-clamp-2 text-sm text-gray-500">
+                {previewOf(job.candidateSummary)}
               </p>
             )}
           </li>
