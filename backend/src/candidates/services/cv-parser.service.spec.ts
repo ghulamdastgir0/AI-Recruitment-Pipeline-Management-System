@@ -1,3 +1,4 @@
+import { ConfigService } from '@nestjs/config';
 import { LlmClientService } from '../../shared/llm/llm-client.service';
 import { CvParserService } from './cv-parser.service';
 
@@ -17,7 +18,10 @@ function buildService() {
   const llm = {
     chat: jest.fn(),
   } as unknown as jest.Mocked<LlmClientService>;
-  return { service: new CvParserService(llm), llm };
+  const config = {
+    get: jest.fn().mockReturnValue(undefined),
+  } as unknown as jest.Mocked<ConfigService>;
+  return { service: new CvParserService(llm, config), llm };
 }
 
 describe('CvParserService', () => {

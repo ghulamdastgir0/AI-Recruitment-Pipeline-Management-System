@@ -247,11 +247,20 @@ export class JobPostingsService {
       .$executeRaw`UPDATE "Job" SET embedding = ${vectorLiteral}::vector WHERE id = ${jobId}`;
   }
 
+  /**
+   * Replaces the full required (or preferred) skill set for this job — not
+   * just an additive upsert. Without the delete step, PATCHing
+   * requiredSkills/preferredSkills would only ever grow the list: stale
+   * skills from a previous edit (or a bad initial value) would stick around
+   * forever and keep dragging the scoring algorithm's required/preferred
+   * buckets down against the names the caller actually intended to replace.
+   */
   private async syncSkills(
     jobId: string,
     skillNames: string[],
     required: boolean,
   ): Promise<void> {
+    const skillIds: string[] = [];
     for (const rawName of skillNames) {
       const name = rawName.trim();
       if (!name) continue;
@@ -261,6 +270,7 @@ export class JobPostingsService {
         update: {},
         create: { name },
       });
+      skillIds.push(skill.id);
 
       await this.prisma.jobSkill.upsert({
         where: { jobId_skillId: { jobId, skillId: skill.id } },
@@ -268,6 +278,14 @@ export class JobPostingsService {
         create: { jobId, skillId: skill.id, required },
       });
     }
+
+    await this.prisma.jobSkill.deleteMany({
+      where: {
+        jobId,
+        required,
+        skillId: { notIn: skillIds },
+      },
+    });
   }
 }
 

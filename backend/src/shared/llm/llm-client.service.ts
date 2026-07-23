@@ -23,7 +23,12 @@ export class LlmClientService {
 
   async chat(
     messages: ChatMessage[],
-    options?: { tools?: ToolDefinition[]; jsonResponse?: boolean },
+    options?: {
+      tools?: ToolDefinition[];
+      jsonResponse?: boolean;
+      /** Overrides GROQ_MODEL/DEFAULT_MODEL for this call — some tasks need a different model than the shared default. */
+      model?: string;
+    },
   ): Promise<ChatCompletionResult> {
     const apiKey = this.config.get<string>('GROQ_API_KEY');
     if (!apiKey) {
@@ -42,7 +47,10 @@ export class LlmClientService {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: this.config.get<string>('GROQ_MODEL') ?? DEFAULT_MODEL,
+        model:
+          options?.model ??
+          this.config.get<string>('GROQ_MODEL') ??
+          DEFAULT_MODEL,
         messages,
         ...(options?.tools
           ? { tools: options.tools, tool_choice: 'auto' }

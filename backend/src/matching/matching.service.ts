@@ -4,6 +4,7 @@ import type { ExtractedCvProfileDto } from '../candidates/dto/extracted-cv-profi
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../shared/email/email.service';
 import { EmbeddingsService } from '../shared/embeddings/embeddings.service';
+import { CandidateLinksService } from '../shared/links/candidate-links.service';
 import {
   INTERVIEW_SCORE_THRESHOLD,
   INTERVIEW_WINDOW_HOURS,
@@ -46,6 +47,7 @@ export class MatchingService {
     private readonly embeddings: EmbeddingsService,
     private readonly audit: AuditLogService,
     private readonly email: EmailService,
+    private readonly links: CandidateLinksService,
   ) {}
 
   /**
@@ -106,6 +108,14 @@ export class MatchingService {
         certifications: extracted?.certifications ?? [],
         resumePages: (candidate.resumePagesJson as ResumePage[] | null) ?? [],
       },
+    );
+
+    this.logger.log(
+      `Match score for candidate ${candidateProfileId} vs job "${job.title}" (${jobPostingId}): ` +
+        `${computation.overallScore}/100 — ${computation.recommendation} (${computation.confidence} confidence) | ` +
+        `breakdown: requiredSkills=${computation.breakdown.requiredSkills} preferredSkills=${computation.breakdown.preferredSkills} ` +
+        `experience=${computation.breakdown.relevantExperience} projects=${computation.breakdown.projects} education=${computation.breakdown.education} | ` +
+        `matched=[${computation.matchedSkills.join(', ')}] missing=[${computation.missingRequiredSkills.join(', ')}]`,
     );
 
     const matchResult = await this.prisma.matchResult.create({
@@ -216,6 +226,7 @@ export class MatchingService {
           candidateName,
           jobTitle,
           interviewDeadline: windowExpiresAt,
+          interviewLink: this.links.interviewUrl(applicationId),
         },
       });
       if (sent) {

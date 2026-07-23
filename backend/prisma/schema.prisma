@@ -387,6 +387,10 @@ model AIInterviewSession {
   startedAt       DateTime?
   completedAt     DateTime?
 
+  // Set once the "you still have time" nudge has gone out (FR-INT
+  // reminder) — prevents the reminder cron from re-sending it every tick.
+  reminderSentAt DateTime?
+
   // Aggregate score derived from the skill matrix below.
   overallScore Decimal? @db.Decimal(5, 2)
 
@@ -503,6 +507,7 @@ enum IntStatus {
 enum EmailType {
   SCREENING_REJECTION
   INTERVIEW_ACKNOWLEDGEMENT
+  INTERVIEW_REMINDER
   SELECTION
   NEXT_ROUND
   REJECTION

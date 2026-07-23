@@ -78,6 +78,12 @@ export class InterviewOrchestratorService {
 
     const systemPrompt = `You are conducting a short, friendly technical interview for a "${input.jobTitle}" role. Ask one focused technical question at a time to assess real proficiency, not memorized trivia.
 
+This is a VERBAL, spoken-only interview — the candidate answers out loud and has no keyboard, editor, or whiteboard. NEVER ask them to write, type, or code up a solution. If you want to assess coding/algorithmic knowledge, instead:
+- Include a short code snippet directly in questionText and ask the candidate to dry-run it mentally and state what it outputs/does, or spot the bug in it.
+- Ask them to explain, in their own words, how they'd approach or design something (no code required).
+- Ask about time/space complexity of an approach, or to compare tradeoffs between two approaches.
+- Ask them to walk through a concept, algorithm, or a piece of code you describe or paste into questionText.
+
 Required skills to prioritize: ${input.requiredSkills.join(', ') || 'none specified'}.
 Preferred skills: ${input.preferredSkills.join(', ') || 'none specified'}.
 The candidate's CV lists these skills: ${input.candidateSkills.join(', ') || 'none listed'}.

@@ -78,7 +78,11 @@ export class InterviewSessionsController {
 
   @Get(':applicationId/status')
   @UseGuards(ThrottlerGuard)
-  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  // The frontend polls this every few seconds while an application is
+  // pending/in-progress — needs real headroom above a single candidate's
+  // sustained poll rate, not just occasional-check levels like the other
+  // endpoints here.
+  @Throttle({ default: { limit: 120, ttl: 60_000 } })
   @ApiOperation({
     summary:
       'Check your application/interview status. No authentication required. Never exposes your CV match score — only interview results after you complete it.',

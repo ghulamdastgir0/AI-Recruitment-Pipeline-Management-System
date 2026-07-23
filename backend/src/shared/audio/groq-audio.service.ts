@@ -46,8 +46,11 @@ export class GroqAudioService {
   async synthesizeSpeech(text: string): Promise<Buffer> {
     const apiKey = this.requireConfig('GROQ_API_KEY');
     const apiUrl = this.requireConfig('GROQ_TTS_API_URL');
-    const model = this.config.get<string>('GROQ_TTS_MODEL') ?? 'playai-tts';
-    const voice = this.config.get<string>('GROQ_TTS_VOICE') ?? 'Fritz-PlayAI';
+    // playai-tts was decommissioned by Groq (2026) — canopylabs/orpheus-v1-english is its replacement.
+    const model =
+      this.config.get<string>('GROQ_TTS_MODEL') ??
+      'canopylabs/orpheus-v1-english';
+    const voice = this.config.get<string>('GROQ_TTS_VOICE') ?? 'troy';
 
     const response = await fetch(apiUrl, {
       method: 'POST',

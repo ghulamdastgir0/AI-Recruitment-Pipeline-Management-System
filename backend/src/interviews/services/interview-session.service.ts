@@ -39,10 +39,13 @@ export interface SkillResultView {
   justification: string;
 }
 
+// Deliberately score-free — candidates never see their interview score or
+// per-skill breakdown (same "don't expose scoring" stance as the CV match
+// score), only a plain confirmation that their interview was recorded.
+// Staff get the real numbers via getTranscript()/InterviewTranscriptView.
 export interface InterviewResultView {
   status: 'COMPLETED';
-  overallScore: number;
-  skills: SkillResultView[];
+  message: string;
 }
 
 export interface InterviewStatusView {
@@ -50,7 +53,9 @@ export interface InterviewStatusView {
   message: string;
   interviewDeadline?: Date;
   currentQuestion?: InterviewTurnView;
-  result?: { overallScore: number; skills: SkillResultView[] };
+  result?: InterviewResultView;
+  /** CV processing failed permanently — nothing will change without a fresh upload; lets pollers stop. */
+  terminal?: boolean;
 }
 
 export interface TranscriptQuestionView {
@@ -78,6 +83,9 @@ const invitePlainMessage = (deadline: Date): string =>
 
 const rejectionPlainMessage =
   "Thank you for applying. After careful review, we've decided not to move forward with your application at this time.";
+
+const interviewSubmittedMessage =
+  'Your interview was submitted successfully. Our team will review your responses and let you know if you are eligible to move forward.';
 
 @Injectable()
 export class InterviewSessionService {
@@ -231,13 +239,13 @@ export class InterviewSessionService {
     const application = await this.prisma.application.findUnique({
       where: { id: applicationId },
       include: {
+        candidateProfile: true,
         interviewSession: {
           include: {
             questions: {
               orderBy: { sequenceOrder: 'asc' },
               include: { targetSkill: true },
             },
-            skillGrades: { include: { skill: true } },
           },
         },
       },
@@ -253,6 +261,17 @@ export class InterviewSessionService {
         return {
           applicationStatus: application.status,
           message: rejectionPlainMessage,
+        };
+      }
+      // Distinct from the generic "still being reviewed" — scoring never
+      // ran and never will for this CV, so the candidate shouldn't be left
+      // thinking it's still in progress.
+      if (application.candidateProfile.cvStatus === 'FAILED') {
+        return {
+          applicationStatus: application.status,
+          message:
+            'We had trouble reading your CV, so we could not complete your application. Please try uploading it again — a clearer scan or a text-based PDF usually resolves this.',
+          terminal: true,
         };
       }
       return {
@@ -288,18 +307,8 @@ export class InterviewSessionService {
       case 'COMPLETED':
         return {
           applicationStatus: application.status,
-          message:
-            'Your technical interview is complete. Our team will be in touch with next steps.',
-          result: {
-            overallScore: session.overallScore
-              ? Number(session.overallScore)
-              : 0,
-            skills: session.skillGrades.map((g) => ({
-              skillName: g.skill.name,
-              proficiencyScore: g.proficiencyScore,
-              justification: g.justification,
-            })),
-          },
+          message: interviewSubmittedMessage,
+          result: { status: 'COMPLETED', message: interviewSubmittedMessage },
         };
       default:
         return {
@@ -441,8 +450,7 @@ export class InterviewSessionService {
 
     return {
       status: 'COMPLETED',
-      overallScore: grade.overallScore,
-      skills: grade.skills,
+      message: interviewSubmittedMessage,
     };
   }
 

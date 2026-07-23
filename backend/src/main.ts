@@ -6,6 +6,11 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Allows the Next.js frontend (a different origin) to call this API.
+  // CORS_ORIGIN defaults to '*' for local dev/testing; set it explicitly
+  // for any deployed environment.
+  app.enableCors({ origin: process.env.CORS_ORIGIN ?? '*' });
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

@@ -37,6 +37,21 @@ function loadPdfjs() {
   return pdfjsModulePromise;
 }
 
+// Some PDF generators (icon-heavy resume templates like enhancv.com are a
+// known source) map decorative glyphs — phone/email/location icons — onto
+// control code points instead of real characters. pdf.js dutifully extracts
+// them as literal U+0000 etc., which Postgres then hard-rejects ("invalid
+// byte sequence for encoding UTF8: 0x00") the moment that text is written to
+// any text/JSON column — surfacing far downstream of the actual PDF as a
+// confusing CV-processing failure. Stripped here, once, for every consumer.
+const DISALLOWED_CONTROL_CHARS =
+  // eslint-disable-next-line no-control-regex -- deliberately targeting C0 control chars
+  /[\x00-\x08\x0B\x0C\x0E-\x1F]/g;
+
+export function sanitizeExtractedText(text: string): string {
+  return text.replace(DISALLOWED_CONTROL_CHARS, '');
+}
+
 /** Extracts per-page text from a PDF buffer so chunks/evidence can carry an accurate page number. */
 @Injectable()
 export class PdfTextExtractorService {
@@ -54,9 +69,11 @@ export class PdfTextExtractorService {
         const page = await pdf.getPage(pageNumber);
         try {
           const textContent = await page.getTextContent();
-          const text = (textContent.items as PdfJsTextItem[])
-            .map((item) => item.str ?? '')
-            .join(' ');
+          const text = sanitizeExtractedText(
+            (textContent.items as PdfJsTextItem[])
+              .map((item) => item.str ?? '')
+              .join(' '),
+          );
           pages.push({ pageNumber, text });
         } finally {
           page.cleanup();

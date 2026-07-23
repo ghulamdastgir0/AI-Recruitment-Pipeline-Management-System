@@ -2,6 +2,7 @@ import { AuditLogService } from '../audit/audit-log.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../shared/email/email.service';
 import { EmbeddingsService } from '../shared/embeddings/embeddings.service';
+import { CandidateLinksService } from '../shared/links/candidate-links.service';
 import { MatchingService } from './matching.service';
 
 const JOB_NO_DEGREE_MENTION = 'Build cool things with modern tools.';
@@ -28,9 +29,14 @@ function buildService() {
   const email = {
     send: jest.fn().mockResolvedValue(true),
   } as unknown as jest.Mocked<EmailService>;
+  const links = {
+    interviewUrl: jest
+      .fn()
+      .mockReturnValue('http://localhost:3001/interview/test'),
+  } as unknown as jest.Mocked<CandidateLinksService>;
 
   return {
-    service: new MatchingService(prisma, embeddings, audit, email),
+    service: new MatchingService(prisma, embeddings, audit, email, links),
     prisma,
     email,
   };

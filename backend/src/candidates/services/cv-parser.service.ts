@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { LlmClientService } from '../../shared/llm/llm-client.service';
@@ -6,6 +7,19 @@ import {
   ExtractedCvProfileDto,
   stripProtectedCharacteristics,
 } from '../dto/extracted-cv-profile.dto';
+
+/**
+ * The shared default chat model (llama-3.3-70b-versatile) was found to
+ * confabulate entire fictional resumes for this task instead of grounding on
+ * the given CV text — wrong name/email/employers, unrelated to the actual
+ * input — which also produces malformed JSON (prose prepended before the
+ * object) and fails Groq's json_object validator. gpt-oss-20b was verified
+ * (manually, against a real CV that reproduced the failure) to extract
+ * accurately and reliably. Scoped to this parser only, not the shared
+ * default, since other callers (assistant tool-calling, rerank) haven't
+ * shown this problem and swapping the global default is a bigger change.
+ */
+const DEFAULT_CV_PARSER_MODEL = 'openai/gpt-oss-20b';
 
 const CV_PARSER_SYSTEM_PROMPT = `You extract structured data from a candidate's CV/resume text for an ATS screening tool.
 
@@ -34,9 +48,15 @@ const MAX_PARSE_ATTEMPTS = 3;
 
 @Injectable()
 export class CvParserService {
-  constructor(private readonly llm: LlmClientService) {}
+  constructor(
+    private readonly llm: LlmClientService,
+    private readonly config: ConfigService,
+  ) {}
 
   async parse(resumeText: string): Promise<ExtractedCvProfileDto> {
+    const model =
+      this.config.get<string>('GROQ_CV_PARSER_MODEL') ??
+      DEFAULT_CV_PARSER_MODEL;
     let lastError = '';
 
     for (let attempt = 1; attempt <= MAX_PARSE_ATTEMPTS; attempt++) {
@@ -59,7 +79,7 @@ export class CvParserService {
                   : `CV text:\n\n${resumeText}\n\nYour previous output was invalid (${lastError}). Return ONLY a single valid JSON object matching the schema — no prose, no markdown, no trailing commentary.`,
             },
           ],
-          { jsonResponse: true },
+          { jsonResponse: true, model },
         );
 
         const raw: unknown = JSON.parse(result.message.content ?? '{}');

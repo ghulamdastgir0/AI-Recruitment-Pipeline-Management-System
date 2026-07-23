@@ -6,11 +6,13 @@ export interface RankedCandidate {
   applicationId: string;
   candidateProfileId: string;
   candidateName: string | null;
-  overallScore: number;
-  recommendation: string;
-  confidence: string;
+  /** Current Application status — lets HR see candidates that applied but haven't been scored yet. */
+  applicationStatus: string;
+  overallScore: number | null;
+  recommendation: string | null;
+  confidence: string | null;
   summary: string;
-  processedAt: Date;
+  processedAt: Date | null;
 }
 
 export interface RankFilters {
@@ -52,30 +54,52 @@ export class RankingService {
         candidateProfile: true,
         matchResults: { orderBy: { processedAt: 'desc' }, take: 1 },
       },
+      orderBy: { createdAt: 'desc' },
     });
 
+    // Every application shows up here, scored or not — a candidate whose CV
+    // is still processing (or whose scoring failed) is still "applied" from
+    // HR's perspective and shouldn't silently vanish from the list.
     let ranked: RankedCandidate[] = applications
-      .filter((app) => app.matchResults.length > 0)
       .map((app) => {
-        const latest = app.matchResults[0];
         const extracted = app.candidateProfile.extractedDataJson as {
           name?: string;
         } | null;
+        const latest = app.matchResults[0];
+        if (latest) {
+          return {
+            applicationId: app.id,
+            candidateProfileId: app.candidateProfileId,
+            candidateName: extracted?.name ?? null,
+            applicationStatus: app.status,
+            overallScore: Number(latest.overallScore),
+            recommendation: latest.recommendation,
+            confidence: latest.confidence,
+            summary: latest.summary,
+            processedAt: latest.processedAt,
+          };
+        }
         return {
           applicationId: app.id,
           candidateProfileId: app.candidateProfileId,
           candidateName: extracted?.name ?? null,
-          overallScore: Number(latest.overallScore),
-          recommendation: latest.recommendation,
-          confidence: latest.confidence,
-          summary: latest.summary,
-          processedAt: latest.processedAt,
+          applicationStatus: app.status,
+          overallScore: null,
+          recommendation: null,
+          confidence: null,
+          summary: this.pendingSummary(
+            app.candidateProfile.cvStatus,
+            app.candidateProfile.cvProcessingError,
+          ),
+          processedAt: null,
         };
       })
-      .sort((a, b) => b.overallScore - a.overallScore);
+      .sort((a, b) => (b.overallScore ?? -1) - (a.overallScore ?? -1));
 
     if (filters.minScore !== undefined) {
-      ranked = ranked.filter((r) => r.overallScore >= filters.minScore!);
+      ranked = ranked.filter(
+        (r) => r.overallScore !== null && r.overallScore >= filters.minScore!,
+      );
     }
     if (filters.recommendation) {
       ranked = ranked.filter(
@@ -92,13 +116,29 @@ export class RankingService {
     return ranked;
   }
 
-  /** Best-effort: reorders the top of the list via one LLM call; any failure or malformed response leaves the deterministic order untouched. */
+  private pendingSummary(
+    cvStatus: string,
+    cvProcessingError: string | null,
+  ): string {
+    switch (cvStatus) {
+      case 'FAILED':
+        return `CV processing failed: ${cvProcessingError ?? 'unknown error'}`;
+      case 'PROCESSING':
+        return 'CV is still being processed — scoring will run automatically once it finishes.';
+      default:
+        return 'Scoring is in progress.';
+    }
+  }
+
+  /** Best-effort: reorders the top of the list via one LLM call; any failure or malformed response leaves the deterministic order untouched. Unscored candidates are left out of the LLM pass entirely and stay appended at the end. */
   private async llmRerank(
     jobTitle: string,
     candidates: RankedCandidate[],
   ): Promise<RankedCandidate[]> {
-    const top = candidates.slice(0, 10);
-    const rest = candidates.slice(10);
+    const scored = candidates.filter((c) => c.overallScore !== null);
+    const unscored = candidates.filter((c) => c.overallScore === null);
+    const top = scored.slice(0, 10);
+    const rest = scored.slice(10);
 
     const listing = top
       .map(
@@ -131,7 +171,7 @@ export class RankingService {
         .map((n) => top[n - 1])
         .filter((c): c is RankedCandidate => c !== undefined);
       return reordered.length === top.length
-        ? [...reordered, ...rest]
+        ? [...reordered, ...rest, ...unscored]
         : candidates;
     } catch {
       return candidates;

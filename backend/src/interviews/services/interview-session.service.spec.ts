@@ -319,16 +319,12 @@ describe('InterviewSessionService', () => {
 
       expect(orchestrator.nextTurn).not.toHaveBeenCalled();
       expect(orchestrator.grade).toHaveBeenCalled();
+      // Candidate-facing result is deliberately score-free — the real
+      // score/skills are still persisted (asserted below) but never
+      // returned to the candidate directly.
       expect(result).toEqual({
         status: 'COMPLETED',
-        overallScore: 88,
-        skills: [
-          {
-            skillName: 'Skill5',
-            proficiencyScore: 90,
-            justification: 'Great answer.',
-          },
-        ],
+        message: expect.any(String),
       });
       expect(prisma.aIInterviewSession.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -375,6 +371,38 @@ describe('InterviewSessionService', () => {
 
       expect(storage.read).toHaveBeenCalledWith('/storage/x.wav');
       expect(buffer).toEqual(Buffer.from('audio'));
+    });
+  });
+
+  describe('getStatus', () => {
+    it('reports a terminal failure message (not "still being reviewed") when CV processing failed', async () => {
+      const { service, prisma } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        id: 'app-1',
+        status: 'APPLIED',
+        candidateProfile: { cvStatus: 'FAILED' },
+        interviewSession: null,
+      });
+
+      const status = await service.getStatus('app-1');
+
+      expect(status.terminal).toBe(true);
+      expect(status.message).not.toMatch(/still being reviewed/i);
+    });
+
+    it('reports "still being reviewed" while the CV has not failed and no session exists yet', async () => {
+      const { service, prisma } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        id: 'app-1',
+        status: 'APPLIED',
+        candidateProfile: { cvStatus: 'PROCESSING' },
+        interviewSession: null,
+      });
+
+      const status = await service.getStatus('app-1');
+
+      expect(status.terminal).toBeUndefined();
+      expect(status.message).toMatch(/still being reviewed/i);
     });
   });
 });

@@ -3,8 +3,10 @@ import { EmailType } from '../../generated/prisma/enums';
 export interface EmailVariables {
   candidateName?: string | null;
   jobTitle: string;
-  /** Deadline to complete the AI technical interview (INTERVIEW_ACKNOWLEDGEMENT). */
+  /** Deadline to complete the AI technical interview (INTERVIEW_ACKNOWLEDGEMENT, INTERVIEW_REMINDER). */
   interviewDeadline?: Date;
+  /** Direct link to the candidate's interview page (INTERVIEW_REMINDER). */
+  interviewLink?: string;
   /** HR-provided date/time for a further human interview round (NEXT_ROUND). */
   nextRoundTime?: Date;
   /** HR-provided deadline to respond/schedule the next round (NEXT_ROUND). */
@@ -50,7 +52,20 @@ export function buildEmail(type: EmailType, v: EmailVariables): EmailContent {
           <p>${greet(v.candidateName)}</p>
           <p>Congratulations — your application for the <strong>${v.jobTitle}</strong> position has passed our initial screening.</p>
           <p>The next step is a short, AI-conducted technical interview. It's quick, conversational, and can be completed from wherever you are.</p>
+          ${v.interviewLink ? `<p><a href="${v.interviewLink}">Click here to start your interview</a>.</p>` : ''}
           <p>Please complete it before <strong>${formatDateTime(v.interviewDeadline)}</strong>. If you have any trouble accessing it, reply to this email and our team will assist you.</p>
+        `),
+      };
+
+    case 'INTERVIEW_REMINDER':
+      return {
+        subject: `Reminder: complete your technical interview for ${v.jobTitle}`,
+        html: wrap(`
+          <p>${greet(v.candidateName)}</p>
+          <p>Just a reminder — we haven't seen you start the short AI technical interview for the <strong>${v.jobTitle}</strong> position yet.</p>
+          <p>You still have time: your window stays open until <strong>${formatDateTime(v.interviewDeadline)}</strong> (about 2 days from your invite).</p>
+          ${v.interviewLink ? `<p><a href="${v.interviewLink}">Click here to start your interview</a>.</p>` : ''}
+          <p>If you have any trouble accessing it, reply to this email and our team will assist you.</p>
         `),
       };
 

@@ -4,10 +4,15 @@ import { JobPostingAssignmentsController } from './job-posting-assignments.contr
 import { JobPostingAssignmentsService } from './job-posting-assignments.service';
 import { JobPostingsController } from './job-postings.controller';
 import { JobPostingsService } from './job-postings.service';
+import { PublicJobPostingsController } from './public-job-postings.controller';
 
 @Module({
   imports: [DocumentsModule],
-  controllers: [JobPostingsController, JobPostingAssignmentsController],
+  controllers: [
+    JobPostingsController,
+    JobPostingAssignmentsController,
+    PublicJobPostingsController,
+  ],
   providers: [JobPostingsService, JobPostingAssignmentsService],
   exports: [JobPostingsService, JobPostingAssignmentsService],
 })
