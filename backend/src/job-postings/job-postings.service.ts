@@ -13,8 +13,11 @@ import { UpdateJobPostingDto } from './dto/update-job-posting.dto';
 
 // Shared shape instructions for the candidate-facing summary, used by both
 // the combined drafting prompt and the standalone re-summarize prompt so the
-// two paths can never drift into different lengths/styles.
-const CANDIDATE_SUMMARY_SHAPE = `3-5 short paragraphs (roughly 150-250 words total), separated by a blank line ("\\n\\n") between paragraphs, covering: a role overview, what the day-to-day work looks like, the kind of team/projects they'd work with, and the work arrangement (remote/onsite/hybrid, location). You may describe the general skill areas involved narratively (e.g. "you'll work with modern backend technologies and databases") but never state them as a checklist, never say "required" or "must have", never give a specific number of years of experience, and never mention any scoring or qualification criteria — this is a candidate-facing pitch for the role, not the internal hiring bar.`;
+// two paths can never drift into different lengths/styles. Responsibilities
+// and required/preferred skills are shown to candidates as their own
+// structured sections (see PublicJobPostingDto), so this summary only needs
+// to carry the narrative overview, not restate them.
+const CANDIDATE_SUMMARY_SHAPE = `2-3 short paragraphs (roughly 100-180 words total), separated by a blank line ("\\n\\n") between paragraphs, covering: a role overview, what the day-to-day work looks like, and the kind of team/projects they'd work with. Do not restate the work arrangement/location or list specific required skills here — those are shown separately.`;
 
 const JD_DRAFTING_SYSTEM_PROMPT = `You draft job postings for an HR recruitment system. Ground every claim about the
 company's technology stack, benefits, culture, and hiring standards in the provided company document excerpts.
@@ -22,8 +25,9 @@ Never invent a benefit, technology, salary figure, or work arrangement that isn'
 Use inclusive, non-discriminatory language and never mention protected characteristics
 (age, gender, religion, ethnicity, nationality, marital status, disability).
 
-Return ONLY a JSON object: { "description": string, "candidateSummary": string }
-- "description": plain prose (no headings needed) covering role overview, responsibilities, required qualifications, and work arrangement. This is the full internal posting.
+Return ONLY a JSON object: { "description": string, "responsibilities": string[], "candidateSummary": string }
+- "description": plain prose (no headings needed) covering role overview, required qualifications, and work arrangement. This is the full internal posting.
+- "responsibilities": 4-8 short bullet-point strings describing day-to-day duties for this role (no leading dashes/bullets in the text itself).
 - "candidateSummary": ${CANDIDATE_SUMMARY_SHAPE}`;
 
 const CANDIDATE_SUMMARY_SYSTEM_PROMPT = `You write a candidate-facing summary of a job posting for a recruitment system's public apply page.
@@ -34,6 +38,7 @@ export interface JobPostingWithSkills {
   title: string;
   description: string;
   candidateSummary: string | null;
+  responsibilities: string[];
   status: string;
   requiredSkills: string[];
   preferredSkills: string[];
@@ -64,14 +69,16 @@ export class JobPostingsService {
     createdByUserId: string,
   ): Promise<JobPostingWithSkills> {
     const hrSuppliedDescription = dto.description?.trim();
-    const { description, candidateSummary } = hrSuppliedDescription
-      ? {
-          description: hrSuppliedDescription,
-          candidateSummary: await this.summarizeForCandidates(
-            hrSuppliedDescription,
-          ),
-        }
-      : await this.draftDescription(dto);
+    const { description, responsibilities, candidateSummary } =
+      hrSuppliedDescription
+        ? {
+            description: hrSuppliedDescription,
+            responsibilities: dto.responsibilities ?? [],
+            candidateSummary: await this.summarizeForCandidates(
+              hrSuppliedDescription,
+            ),
+          }
+        : await this.draftDescription(dto);
 
     const job = await this.prisma.job.create({
       data: {
@@ -79,6 +86,7 @@ export class JobPostingsService {
         rawPrompt: dto.rawPrompt,
         generatedDescription: description,
         description,
+        responsibilities,
         candidateSummary,
         experienceMin: dto.experienceMin,
         salaryMax: dto.salaryMax,
@@ -125,6 +133,9 @@ export class JobPostingsService {
         ...(changes.title !== undefined ? { title: changes.title } : {}),
         ...(changes.description !== undefined
           ? { description: changes.description, candidateSummary }
+          : {}),
+        ...(changes.responsibilities !== undefined
+          ? { responsibilities: changes.responsibilities }
           : {}),
         ...(changes.experienceMin !== undefined
           ? { experienceMin: changes.experienceMin }
@@ -202,6 +213,80 @@ export class JobPostingsService {
     return this.getById(id);
   }
 
+  /**
+   * Immediately hides the posting from the public /jobs list (only
+   * status='PUBLISHED' postings are ever returned there) while leaving every
+   * Application/interview/candidate record untouched — resumable later.
+   */
+  async pause(id: string, actorUserId: string): Promise<JobPostingWithSkills> {
+    const job = await this.getById(id);
+    if (job.status === 'PAUSED') return job;
+    if (job.status !== 'PUBLISHED') {
+      throw new BadRequestException(
+        `Only a published job posting can be paused (current status: ${job.status}).`,
+      );
+    }
+
+    await this.prisma.job.update({
+      where: { id },
+      data: { status: 'PAUSED', portalUnpublishedAt: new Date() },
+    });
+    await this.audit.record({
+      actorUserId,
+      action: 'job_posting.paused',
+      resourceType: 'Job',
+      resourceId: id,
+    });
+    return this.getById(id);
+  }
+
+  async resume(
+    id: string,
+    actorUserId: string,
+  ): Promise<JobPostingWithSkills> {
+    const job = await this.getById(id);
+    if (job.status === 'PUBLISHED') return job;
+    if (job.status !== 'PAUSED') {
+      throw new BadRequestException(
+        `Only a paused job posting can be resumed (current status: ${job.status}).`,
+      );
+    }
+
+    await this.prisma.job.update({
+      where: { id },
+      data: { status: 'PUBLISHED', portalPublishedAt: new Date() },
+    });
+    await this.audit.record({
+      actorUserId,
+      action: 'job_posting.resumed',
+      resourceType: 'Job',
+      resourceId: id,
+    });
+    return this.getById(id);
+  }
+
+  /**
+   * Permanently removes the posting and everything tied to it — every
+   * Application against it, and (via Application's own cascade) each one's
+   * AIInterviewSession/AIInterviewQuestion/CandidateSkillGrade, EmailLog, and
+   * MatchResult rows, plus JobSkill/LinkedInPost/JobPostingHiringManager/
+   * CandidateComment — all handled by onDelete: Cascade at the DB level, so
+   * a single job.delete() is sufficient here.
+   */
+  async delete(id: string, actorUserId: string): Promise<void> {
+    const job = await this.getById(id); // throws NotFoundException if missing
+
+    await this.audit.record({
+      actorUserId,
+      action: 'job_posting.deleted',
+      resourceType: 'Job',
+      resourceId: id,
+      details: { title: job.title, status: job.status },
+    });
+
+    await this.prisma.job.delete({ where: { id } });
+  }
+
   async getById(id: string): Promise<JobPostingWithSkills> {
     const job = await this.prisma.job.findUnique({
       where: { id },
@@ -235,9 +320,11 @@ export class JobPostingsService {
     return jobs.map(toJobPostingWithSkills);
   }
 
-  private async draftDescription(
-    dto: CreateJobPostingDto,
-  ): Promise<{ description: string; candidateSummary: string | null }> {
+  private async draftDescription(dto: CreateJobPostingDto): Promise<{
+    description: string;
+    responsibilities: string[];
+    candidateSummary: string | null;
+  }> {
     const policyChunks = await this.documentRetrieval.retrieve(
       `${dto.title}. ${dto.rawPrompt}`,
       6,
@@ -282,6 +369,7 @@ export class JobPostingsService {
     const parsed = parseDraftResult(result.message.content);
     return {
       description: parsed?.description || dto.rawPrompt,
+      responsibilities: parsed?.responsibilities ?? [],
       candidateSummary: parsed?.candidateSummary ?? null,
     };
   }
@@ -361,17 +449,23 @@ export class JobPostingsService {
   }
 }
 
-function parseDraftResult(
-  content: string | null | undefined,
-): { description: string; candidateSummary: string | null } | null {
+function parseDraftResult(content: string | null | undefined): {
+  description: string;
+  responsibilities: string[];
+  candidateSummary: string | null;
+} | null {
   try {
     const parsed = JSON.parse(content ?? '{}') as {
       description?: string;
+      responsibilities?: string[];
       candidateSummary?: string;
     };
     if (!parsed.description?.trim()) return null;
     return {
       description: parsed.description.trim(),
+      responsibilities: Array.isArray(parsed.responsibilities)
+        ? parsed.responsibilities.map((r) => r.trim()).filter(Boolean)
+        : [],
       candidateSummary: parsed.candidateSummary?.trim() || null,
     };
   } catch {
@@ -384,6 +478,7 @@ interface JobWithSkillsRow {
   title: string;
   description: string;
   candidateSummary: string | null;
+  responsibilities: unknown;
   status: string;
   experienceMin: number;
   salaryMax: number | null;
@@ -404,6 +499,9 @@ function toJobPostingWithSkills(job: JobWithSkillsRow): JobPostingWithSkills {
     title: job.title,
     description: job.description,
     candidateSummary: job.candidateSummary,
+    responsibilities: Array.isArray(job.responsibilities)
+      ? (job.responsibilities as string[])
+      : [],
     status: job.status,
     requiredSkills: job.jobSkills
       .filter((js) => js.required)

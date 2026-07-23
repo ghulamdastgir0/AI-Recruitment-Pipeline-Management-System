@@ -133,11 +133,11 @@ export function AudioRecorder({
   const showCountdown = silenceMs >= SILENCE_MS - COUNTDOWN_WARN_MS;
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-gray-200 p-4">
-      {error && <p className="text-sm text-red-600">{error}</p>}
+    <div className="flex flex-col items-center gap-3">
+      {error && <p className="text-sm text-red-400">{error}</p>}
       <div className="flex items-center gap-2">
-        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" />
-        <p className="text-sm text-gray-600">
+        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-blue-500" />
+        <p className="text-sm text-gray-400">
           {showCountdown
             ? `Listening… submitting in ${secondsLeft}s`
             : "Listening…"}
@@ -146,7 +146,7 @@ export function AudioRecorder({
       <button
         type="button"
         onClick={submitNow}
-        className="self-start rounded bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700"
+        className="rounded-full bg-gray-800 px-4 py-2 text-xs font-medium text-gray-200 hover:bg-gray-700"
       >
         Submit now
       </button>

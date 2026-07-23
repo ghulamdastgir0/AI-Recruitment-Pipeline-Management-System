@@ -4,6 +4,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { AudioRecorder } from "@/components/AudioRecorder";
+import { VoiceVisualizer } from "@/components/VoiceVisualizer";
 import { API_BASE_URL, apiFileUrl } from "@/lib/api";
 
 const ANSWER_TIMEOUT_MS = 20_000;
@@ -129,86 +130,121 @@ export default function InterviewPage() {
     };
   }, [started, applicationId]);
 
-  return (
-    <main className="mx-auto w-full max-w-2xl p-6">
-      <h1 className="text-2xl font-bold">AI Technical Interview</h1>
-
-      {!started ? (
-        <div className="mt-6 flex flex-col gap-3 rounded-lg border border-gray-200 p-4">
-          <p className="text-sm text-gray-600">
-            This interview listens continuously — just speak your answer. If
-            you go quiet for 10 seconds, your answer is submitted
-            automatically and the next question follows.
+  if (!started) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-950 p-6">
+        <div className="flex w-full max-w-md flex-col gap-4 rounded-2xl border border-gray-800 bg-gray-900 p-6">
+          <h1 className="text-xl font-semibold text-white">
+            AI Technical Interview
+          </h1>
+          <p className="text-sm text-gray-400">
+            This is a live conversation — the interview begins as soon as you
+            join. Just speak your answers naturally; if you go quiet for 10
+            seconds, your answer is submitted automatically and the next
+            question follows. No buttons to press.
           </p>
-          {micError && <p className="text-sm text-red-600">{micError}</p>}
+          {micError && <p className="text-sm text-red-400">{micError}</p>}
           <button
             onClick={() => void startInterview()}
-            className="self-start rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            className="self-start rounded-full bg-brand-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-brand-500"
           >
-            Start Interview
+            Join Interview
           </button>
         </div>
-      ) : (
-        <>
-          <p className="mt-1 text-sm text-gray-500">
-            {connected ? "Connected" : "Connecting…"}
-          </p>
+      </main>
+    );
+  }
 
-          {error && <p className="mt-4 text-red-600">{error}</p>}
+  return (
+    <main className="flex min-h-screen flex-col bg-gray-950 text-white">
+      <div className="flex items-center justify-between px-6 py-4 text-sm text-gray-400">
+        <span>{connected ? "Connected" : "Connecting…"}</span>
+        {question && <span>Question {question.sequenceOrder}</span>}
+      </div>
 
-          {result ? (
-            <div className="mt-6 rounded-lg border border-green-300 bg-green-50 p-4">
-              <h2 className="text-lg font-semibold text-green-800">
-                Interview Submitted
-              </h2>
-              <p className="mt-2 text-sm text-gray-700">{result.message}</p>
-              <button
-                onClick={() => router.push(`/status/${applicationId}`)}
-                className="mt-4 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-              >
-                Back to status
-              </button>
-            </div>
-          ) : question ? (
-            <div className="mt-6 flex flex-col gap-4">
-              <p className="text-sm text-gray-500">
-                Question {question.sequenceOrder}
-              </p>
-              <p className="text-lg">{question.questionText}</p>
-              <audio
-                key={question.questionId}
-                controls
-                autoPlay
-                src={apiFileUrl(question.questionAudioUrl)}
-                onEnded={() => setListening(true)}
+      {error && (
+        <p className="mx-6 rounded-lg border border-red-800 bg-red-950 p-3 text-sm text-red-300">
+          {error}
+        </p>
+      )}
+
+      <div className="flex flex-1 flex-col items-center justify-center gap-8 px-6 pb-24">
+        {result ? (
+          <div className="flex w-full max-w-md flex-col gap-3 rounded-2xl border border-green-800 bg-green-950 p-6 text-center">
+            <h2 className="text-lg font-semibold text-green-300">
+              Interview Complete
+            </h2>
+            <p className="text-sm text-green-200">{result.message}</p>
+            <button
+              onClick={() => router.push(`/status/${applicationId}`)}
+              className="mx-auto mt-2 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-brand-500"
+            >
+              Back to status
+            </button>
+          </div>
+        ) : question ? (
+          <>
+            <div
+              className={`flex h-40 w-40 items-center justify-center rounded-full border transition-colors duration-500 ${
+                listening
+                  ? "border-brand-500 bg-brand-500/10"
+                  : "border-gray-700 bg-gray-900"
+              }`}
+            >
+              <div
+                className={`h-24 w-24 rounded-full transition-all duration-500 ${
+                  listening ? "bg-brand-500/30" : "bg-gray-800"
+                }`}
               />
+            </div>
+
+            <VoiceVisualizer stream={stream} active={listening} />
+
+            <p className="max-w-xl text-center text-lg text-gray-100">
+              {question.questionText}
+            </p>
+
+            <audio
+              key={question.questionId}
+              autoPlay
+              src={apiFileUrl(question.questionAudioUrl)}
+              onEnded={() => setListening(true)}
+              className="hidden"
+            />
+
+            <div className="w-full max-w-md">
               <AudioRecorder
                 stream={stream}
                 active={listening}
                 onAutoSubmit={sendAnswer}
               />
               {submitting && !stalled && (
-                <p className="text-sm text-gray-500">Submitting your answer…</p>
+                <p className="mt-2 text-center text-sm text-gray-400">
+                  Submitting your answer…
+                </p>
               )}
               {stalled && (
-                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3">
-                  <p className="text-sm text-amber-800">
+                <div className="mt-2 rounded-lg border border-amber-800 bg-amber-950 p-3">
+                  <p className="text-sm text-amber-300">
                     That&apos;s taking longer than expected.
                   </p>
                   <button
                     onClick={retrySend}
-                    className="mt-2 rounded bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700"
+                    className="mt-2 rounded bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-500"
                   >
                     Retry
                   </button>
                 </div>
               )}
             </div>
-          ) : (
-            <p className="mt-6 text-gray-500">Waiting for the first question…</p>
-          )}
-        </>
-      )}
+          </>
+        ) : (
+          <>
+            <VoiceVisualizer stream={stream} active={false} />
+            <p className="text-gray-400">Waiting for the first question…</p>
+          </>
+        )}
+      </div>
     </main>
   );
 }

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,6 +9,8 @@ import { AuditLogService } from '../../audit/audit-log.service';
 import { MatchingService } from '../../matching/matching.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BackgroundJobQueueService } from '../../shared/background-jobs/background-job-queue.service';
+import { EmailService } from '../../shared/email/email.service';
+import { CandidateLinksService } from '../../shared/links/candidate-links.service';
 import { CvProcessorService } from './cv-processor.service';
 import { CvStorageService } from './cv-storage.service';
 
@@ -47,6 +50,8 @@ export class CvUploadService {
     private readonly processor: CvProcessorService,
     private readonly audit: AuditLogService,
     private readonly matching: MatchingService,
+    private readonly email: EmailService,
+    private readonly links: CandidateLinksService,
   ) {}
 
   /**
@@ -79,6 +84,27 @@ export class CvUploadService {
       throw new NotFoundException(
         `No job posting found with id "${jobPostingId}".`,
       );
+    }
+
+    // A candidate must not be able to apply twice to the same job with the
+    // same email — this is independent of the CV-content-hash dedup below,
+    // which only reuses a *processed CV*, not an application decision. Two
+    // different CVs typed against the same email for the same job would
+    // otherwise each get their own CandidateProfile/Application row.
+    if (contact?.email) {
+      const alreadyApplied = await this.prisma.application.findFirst({
+        where: {
+          jobId: jobPostingId,
+          candidateProfile: {
+            candidateEmail: { equals: contact.email, mode: 'insensitive' },
+          },
+        },
+      });
+      if (alreadyApplied) {
+        throw new ConflictException(
+          'You have already applied to this job posting with this email address.',
+        );
+      }
     }
 
     const contentHash = createHash('sha256').update(file.buffer).digest('hex');
@@ -143,6 +169,27 @@ export class CvUploadService {
         resourceId: profile.id,
         details: { jobPostingId, applicationId: application.id },
       });
+    }
+
+    // Best-effort, same pattern as MatchingService.applyScreeningDecision —
+    // a Brevo failure shouldn't fail the upload, and EmailService.send()
+    // itself never throws.
+    if (contact?.email) {
+      const sent = await this.email.send({
+        to: contact.email,
+        type: 'APPLICATION_RECEIVED',
+        variables: {
+          candidateName: contact.name,
+          jobTitle: job.title,
+          applicationReference: application.id,
+          statusLink: this.links.statusUrl(application.id),
+        },
+      });
+      if (sent) {
+        await this.prisma.emailLog.create({
+          data: { applicationId: application.id, type: 'APPLICATION_RECEIVED' },
+        });
+      }
     }
 
     if (profile.cvStatus === 'READY') {

@@ -4,9 +4,13 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { type FormEvent, useEffect, useState } from "react";
 import { PermissionDeniedState } from "@/components/AsyncState";
+import { isRejectedStatus, RejectionDetails } from "@/components/RejectionDetails";
 import { RoleGuard } from "@/components/RoleGuard";
 import { StaffNav } from "@/components/StaffNav";
 import { Timeline } from "@/components/Timeline";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { Textarea } from "@/components/ui/Input";
 import {
   apiFetch,
   ApiError,
@@ -190,17 +194,17 @@ function CandidateDetail() {
   return (
     <>
       <StaffNav />
-      <main className="mx-auto w-full max-w-3xl p-6">
+      <main className="mx-auto w-full max-w-3xl px-6 py-8">
         <Link
           href={`/staff/jobs/${jobId}`}
-          className="text-sm text-blue-600 underline"
+          className="text-sm font-medium text-brand-700 hover:underline"
         >
           ← Back to job
         </Link>
-        <h1 className="mt-2 text-2xl font-bold">
+        <h1 className="mt-2 font-heading text-2xl font-semibold text-text-primary">
           {match?.candidateName ?? "Candidate"}
         </h1>
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-text-muted">
           {[match?.candidateEmail, match?.candidatePhone].filter(Boolean).join(" · ") ||
             candidateId}
         </p>
@@ -211,82 +215,93 @@ function CandidateDetail() {
           </div>
         )}
 
-        <section className="mt-6">
-          <h2 className="text-lg font-semibold">Match Score</h2>
-          <p className="mt-1 text-xs text-gray-500">
+        <section className="mt-8">
+          <h2 className="font-heading text-base font-semibold text-text-primary">
+            Match Score
+          </h2>
+          <p className="mt-1 text-xs text-text-muted">
             AI score is a recommendation and requires HR review.
           </p>
-          {matchMessage && <p className="mt-2 text-sm text-gray-500">{matchMessage}</p>}
+          {matchMessage && <p className="mt-2 text-sm text-text-muted">{matchMessage}</p>}
           {match && (
-            <div className="mt-2 rounded-lg border border-gray-200 p-4">
-              <p className="font-medium">
+            <Card className="mt-2">
+              <p className="font-medium text-text-primary">
                 {match.overallScore}/100 — {match.recommendation} ({match.confidence})
               </p>
-              <p className="mt-1 text-sm text-gray-600">{match.summary}</p>
-              {match.missingRequiredSkills.length > 0 && (
-                <p className="mt-2 text-sm text-red-600">
-                  Missing: {match.missingRequiredSkills.join(", ")}
-                </p>
+              {isRejectedStatus(match.applicationStatus) ? (
+                <RejectionDetails
+                  info={{
+                    overallScore: match.overallScore,
+                    summary: match.summary,
+                    missingRequiredSkills: match.missingRequiredSkills,
+                  }}
+                />
+              ) : (
+                <>
+                  <p className="mt-1 text-sm text-text-secondary">{match.summary}</p>
+                  {match.missingRequiredSkills.length > 0 && (
+                    <p className="mt-2 text-sm text-danger">
+                      Missing: {match.missingRequiredSkills.join(", ")}
+                    </p>
+                  )}
+                </>
               )}
-              <button
+              <Button
+                variant="secondary"
                 onClick={() =>
                   void downloadFile(
                     `/job-postings/${jobId}/candidates/${candidateId}/cv`,
                     `${match.candidateName ?? candidateId}.pdf`,
                   )
                 }
-                className="mt-3 rounded border border-gray-300 px-3 py-1 text-xs hover:bg-gray-50"
+                className="mt-3 px-2.5 py-1 text-xs"
               >
                 Download CV
-              </button>
-            </div>
+              </Button>
+            </Card>
           )}
         </section>
 
-        <section className="mt-6">
-          <h2 className="text-lg font-semibold">AI Interview Transcript</h2>
-          <p className="mt-1 text-xs text-gray-500">
+        <section className="mt-8">
+          <h2 className="font-heading text-base font-semibold text-text-primary">
+            AI Interview Transcript
+          </h2>
+          <p className="mt-1 text-xs text-text-muted">
             AI score is a recommendation and requires HR review.
           </p>
           {transcriptMessage && (
-            <p className="mt-2 text-sm text-gray-500">{transcriptMessage}</p>
+            <p className="mt-2 text-sm text-text-muted">{transcriptMessage}</p>
           )}
           {transcript && (
             <div className="mt-2 flex flex-col gap-4">
-              <p className="text-sm text-gray-500">
+              <p className="text-sm text-text-muted">
                 Session: {transcript.sessionStatus}
                 {transcript.overallScore !== null &&
                   ` · Overall score: ${transcript.overallScore}/100`}
               </p>
               {transcript.questions.map((question) => (
-                <div
-                  key={question.sequenceOrder}
-                  className="rounded border border-gray-200 p-3"
-                >
-                  <p className="text-xs text-gray-500">
+                <Card key={question.sequenceOrder} className="p-3">
+                  <p className="text-xs text-text-muted">
                     Q{question.sequenceOrder} · {question.targetSkillName ?? "General"}
                     {question.isFollowUp ? " (follow-up)" : ""}
                   </p>
-                  <p className="mt-1 font-medium">{question.questionText}</p>
-                  <p className="mt-1 text-sm text-gray-700">
+                  <p className="mt-1 font-medium text-text-primary">{question.questionText}</p>
+                  <p className="mt-1 text-sm text-text-secondary">
                     {question.answerText ?? "(not answered)"}
                   </p>
-                </div>
+                </Card>
               ))}
               {transcript.skillGrades.length > 0 && (
                 <div>
-                  <h3 className="font-medium">Skill Grades</h3>
+                  <h3 className="font-medium text-text-primary">Skill Grades</h3>
                   <ul className="mt-2 flex flex-col gap-2">
                     {transcript.skillGrades.map((grade) => (
-                      <li
-                        key={grade.skillName}
-                        className="rounded border border-gray-200 p-3"
-                      >
-                        <p className="font-medium">
+                      <Card key={grade.skillName} as="li" className="p-3">
+                        <p className="font-medium text-text-primary">
                           {grade.skillName}: {grade.proficiencyScore}/100
                         </p>
-                        <p className="text-sm text-gray-600">{grade.justification}</p>
-                      </li>
+                        <p className="text-sm text-text-secondary">{grade.justification}</p>
+                      </Card>
                     ))}
                   </ul>
                 </div>
@@ -295,114 +310,109 @@ function CandidateDetail() {
           )}
         </section>
 
-        <section className="mt-6">
-          <h2 className="text-lg font-semibold">Comments</h2>
+        <section className="mt-8">
+          <h2 className="font-heading text-base font-semibold text-text-primary">
+            Comments
+          </h2>
           <ul className="mt-2 flex flex-col gap-2">
             {comments.map((comment) => (
-              <li
-                key={comment.id}
-                className="rounded border border-gray-200 p-3 text-sm"
-              >
+              <Card key={comment.id} as="li" className="p-3 text-sm text-text-secondary">
                 {comment.content}
-              </li>
+              </Card>
             ))}
             {comments.length === 0 && (
-              <p className="text-sm text-gray-500">No comments yet.</p>
+              <p className="text-sm text-text-muted">No comments yet.</p>
             )}
           </ul>
           {canComment && (
             <form onSubmit={submitComment} className="mt-3 flex flex-col gap-2">
-              <textarea
+              <Textarea
                 value={newComment}
                 onChange={(event) => setNewComment(event.target.value)}
                 placeholder="Add a comment…"
                 rows={2}
-                className="rounded border border-gray-300 px-3 py-2"
               />
-              <button
-                type="submit"
-                className="self-start rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-              >
+              <Button type="submit" className="self-start">
                 Post Comment
-              </button>
+              </Button>
             </form>
           )}
         </section>
 
         {canDecide && match?.applicationStatus === "IN_REVIEW" && (
-          <section className="mt-6 rounded-lg border border-gray-200 p-4">
-            <h2 className="text-lg font-semibold">Manager Review</h2>
-            <p className="mt-1 text-sm text-gray-600">
+          <Card className="mt-8">
+            <h2 className="font-heading text-base font-semibold text-text-primary">
+              Manager Review
+            </h2>
+            <p className="mt-1 text-sm text-text-secondary">
               The AI interview is complete. Move this candidate into manager
               review before making a final decision.
             </p>
-            <button
+            <Button
               onClick={moveToManagerReview}
               disabled={movingToManagerReview}
-              className="mt-3 rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+              className="mt-3"
             >
               {movingToManagerReview ? "Moving…" : "Move to Manager Review"}
-            </button>
+            </Button>
             {managerReviewError && (
-              <p className="mt-2 text-sm text-red-600">{managerReviewError}</p>
+              <p className="mt-2 text-sm text-danger">{managerReviewError}</p>
             )}
             {managerReviewMessage && (
-              <p className="mt-2 text-sm text-green-600">{managerReviewMessage}</p>
+              <p className="mt-2 text-sm text-success-text">{managerReviewMessage}</p>
             )}
-          </section>
+          </Card>
         )}
 
         {canDecide && (
-          <section className="mt-6">
-            <h2 className="text-lg font-semibold">Decision</h2>
-            <form
-              onSubmit={submitDecision}
-              className="mt-2 flex flex-col gap-3 rounded-lg border border-gray-200 p-4"
-            >
-              <select
-                value={decision}
-                onChange={(event) => setDecision(event.target.value as Decision)}
-                className="rounded border border-gray-300 px-3 py-2"
-              >
-                <option value="SELECTED">Selected</option>
-                <option value="NEXT_ROUND">Next Round</option>
-                <option value="REJECTED">Rejected</option>
-              </select>
-              {decision === "NEXT_ROUND" && (
-                <>
-                  <label className="text-sm">
-                    Next round time
-                    <input
-                      required
-                      type="datetime-local"
-                      value={nextRoundTime}
-                      onChange={(event) => setNextRoundTime(event.target.value)}
-                      className="mt-1 w-full rounded border border-gray-300 px-3 py-2"
-                    />
-                  </label>
-                  <label className="text-sm">
-                    Response deadline
-                    <input
-                      required
-                      type="datetime-local"
-                      value={nextRoundDeadline}
-                      onChange={(event) => setNextRoundDeadline(event.target.value)}
-                      className="mt-1 w-full rounded border border-gray-300 px-3 py-2"
-                    />
-                  </label>
-                </>
-              )}
-              {decisionError && <p className="text-sm text-red-600">{decisionError}</p>}
-              {decisionMessage && (
-                <p className="text-sm text-green-600">{decisionMessage}</p>
-              )}
-              <button
-                type="submit"
-                className="self-start rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-              >
-                Submit Decision
-              </button>
-            </form>
+          <section className="mt-8">
+            <h2 className="font-heading text-base font-semibold text-text-primary">
+              Decision
+            </h2>
+            <Card className="mt-2">
+              <form onSubmit={submitDecision} className="flex flex-col gap-3">
+                <select
+                  value={decision}
+                  onChange={(event) => setDecision(event.target.value as Decision)}
+                  className="rounded-[var(--radius-control)] border border-border bg-white px-3 py-2 text-sm text-text-primary focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-100"
+                >
+                  <option value="SELECTED">Selected</option>
+                  <option value="NEXT_ROUND">Next Round</option>
+                  <option value="REJECTED">Rejected</option>
+                </select>
+                {decision === "NEXT_ROUND" && (
+                  <>
+                    <label className="text-sm text-text-secondary">
+                      Next round time
+                      <input
+                        required
+                        type="datetime-local"
+                        value={nextRoundTime}
+                        onChange={(event) => setNextRoundTime(event.target.value)}
+                        className="mt-1 w-full rounded-[var(--radius-control)] border border-border px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-100"
+                      />
+                    </label>
+                    <label className="text-sm text-text-secondary">
+                      Response deadline
+                      <input
+                        required
+                        type="datetime-local"
+                        value={nextRoundDeadline}
+                        onChange={(event) => setNextRoundDeadline(event.target.value)}
+                        className="mt-1 w-full rounded-[var(--radius-control)] border border-border px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-100"
+                      />
+                    </label>
+                  </>
+                )}
+                {decisionError && <p className="text-sm text-danger">{decisionError}</p>}
+                {decisionMessage && (
+                  <p className="text-sm text-success-text">{decisionMessage}</p>
+                )}
+                <Button type="submit" className="self-start">
+                  Submit Decision
+                </Button>
+              </form>
+            </Card>
           </section>
         )}
       </main>

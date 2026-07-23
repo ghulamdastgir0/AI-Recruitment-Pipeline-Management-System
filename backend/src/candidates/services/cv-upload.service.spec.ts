@@ -1,8 +1,10 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { AuditLogService } from '../../audit/audit-log.service';
 import { MatchingService } from '../../matching/matching.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BackgroundJobQueueService } from '../../shared/background-jobs/background-job-queue.service';
+import { EmailService } from '../../shared/email/email.service';
+import { CandidateLinksService } from '../../shared/links/candidate-links.service';
 import { CvProcessorService } from './cv-processor.service';
 import { CvStorageService } from './cv-storage.service';
 import { CvUploadService } from './cv-upload.service';
@@ -17,7 +19,11 @@ function buildService() {
       create: jest.fn(),
       update: jest.fn(),
     },
-    application: { upsert: jest.fn() },
+    application: {
+      upsert: jest.fn(),
+      findFirst: jest.fn().mockResolvedValue(null),
+    },
+    emailLog: { create: jest.fn().mockResolvedValue(undefined) },
   } as unknown as jest.Mocked<PrismaService>;
   const storage = {
     save: jest.fn().mockResolvedValue({ filePath: '/storage/cvs/x.pdf' }),
@@ -34,6 +40,13 @@ function buildService() {
   const matching = {
     matchAllPendingApplications: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<MatchingService>;
+  const email = {
+    send: jest.fn().mockResolvedValue(true),
+  } as unknown as jest.Mocked<EmailService>;
+  const links = {
+    interviewUrl: jest.fn().mockReturnValue('http://localhost:3001/interview/app-1'),
+    statusUrl: jest.fn().mockReturnValue('http://localhost:3001/status/app-1'),
+  } as unknown as jest.Mocked<CandidateLinksService>;
 
   return {
     service: new CvUploadService(
@@ -43,6 +56,8 @@ function buildService() {
       processor,
       audit,
       matching,
+      email,
+      links,
     ),
     prisma,
     storage,
@@ -50,6 +65,8 @@ function buildService() {
     processor,
     audit,
     matching,
+    email,
+    links,
   };
 }
 
@@ -337,6 +354,84 @@ describe('CvUploadService', () => {
       await calls[0][0]();
       expect(matching.matchAllPendingApplications).toHaveBeenCalledWith(
         'existing-cand',
+      );
+    });
+
+    it('rejects a second application to the same job with the same email, with ConflictException', async () => {
+      const { service, prisma } = buildService();
+      (prisma.job.findUnique as jest.Mock).mockResolvedValue({
+        id: 'job-1',
+        status: 'PUBLISHED',
+      });
+      (prisma.application.findFirst as jest.Mock).mockResolvedValue({
+        id: 'existing-app',
+      });
+
+      await expect(
+        service.uploadCv(
+          'job-1',
+          { buffer: PDF_BYTES, originalname: 'resume.pdf' },
+          'SELF_APPLIED',
+          undefined,
+          {
+            name: 'Jane Candidate',
+            email: 'jane@example.com',
+            phone: '555-0100',
+          },
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.candidateProfile.findFirst).not.toHaveBeenCalled();
+      expect(prisma.application.upsert).not.toHaveBeenCalled();
+    });
+
+    it('sends an APPLICATION_RECEIVED confirmation email with a status link once the application is created', async () => {
+      const { service, prisma, email, links } = buildService();
+      (prisma.job.findUnique as jest.Mock).mockResolvedValue({
+        id: 'job-1',
+        status: 'PUBLISHED',
+        title: 'Senior Backend Engineer',
+      });
+      (prisma.candidateProfile.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.candidateProfile.create as jest.Mock).mockResolvedValue({
+        id: 'cand-1',
+        cvStatus: 'PROCESSING',
+      });
+      (prisma.application.upsert as jest.Mock).mockResolvedValue({
+        id: 'app-1',
+      });
+
+      await service.uploadCv(
+        'job-1',
+        { buffer: PDF_BYTES, originalname: 'resume.pdf' },
+        'SELF_APPLIED',
+        undefined,
+        {
+          name: 'Jane Candidate',
+          email: 'jane@example.com',
+          phone: '555-0100',
+        },
+      );
+
+      expect(email.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: 'jane@example.com',
+          type: 'APPLICATION_RECEIVED',
+          variables: expect.objectContaining({
+            candidateName: 'Jane Candidate',
+            jobTitle: 'Senior Backend Engineer',
+            applicationReference: 'app-1',
+            statusLink: 'http://localhost:3001/status/app-1',
+          }),
+        }),
+      );
+      expect(links.statusUrl).toHaveBeenCalledWith('app-1');
+      expect(prisma.emailLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            applicationId: 'app-1',
+            type: 'APPLICATION_RECEIVED',
+          }),
+        }),
       );
     });
 

@@ -13,4 +13,10 @@ export class CandidateLinksService {
       this.config.get<string>('PUBLIC_APP_URL') ?? DEFAULT_PUBLIC_APP_URL;
     return `${base.replace(/\/$/, '')}/interview/${applicationId}`;
   }
+
+  statusUrl(applicationId: string): string {
+    const base =
+      this.config.get<string>('PUBLIC_APP_URL') ?? DEFAULT_PUBLIC_APP_URL;
+    return `${base.replace(/\/$/, '')}/status/${applicationId}`;
+  }
 }

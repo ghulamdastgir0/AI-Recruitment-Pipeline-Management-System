@@ -3,6 +3,10 @@ import { EmailType } from '../../generated/prisma/enums';
 export interface EmailVariables {
   candidateName?: string | null;
   jobTitle: string;
+  /** Human-visible application reference, i.e. the applicationId (APPLICATION_RECEIVED). */
+  applicationReference?: string;
+  /** Direct link to the candidate's status-tracking page (APPLICATION_RECEIVED). */
+  statusLink?: string;
   /** Deadline to complete the AI technical interview (INTERVIEW_ACKNOWLEDGEMENT, INTERVIEW_REMINDER). */
   interviewDeadline?: Date;
   /** Direct link to the candidate's interview page (INTERVIEW_REMINDER). */
@@ -34,6 +38,19 @@ function formatDateTime(value: Date | undefined): string {
 
 export function buildEmail(type: EmailType, v: EmailVariables): EmailContent {
   switch (type) {
+    case 'APPLICATION_RECEIVED':
+      return {
+        subject: `We've received your application for ${v.jobTitle}`,
+        html: wrap(`
+          <p>${greet(v.candidateName)}</p>
+          <p>Thank you for applying for the <strong>${v.jobTitle}</strong> position — your application has been received.</p>
+          ${v.applicationReference ? `<p><strong>Application reference:</strong> ${v.applicationReference}</p>` : ''}
+          <p>You can check your application status at any time using the link below.</p>
+          ${v.statusLink ? `<p><a href="${v.statusLink}">Track your application</a>.</p>` : ''}
+          <p>We'll be in touch as soon as there's an update.</p>
+        `),
+      };
+
     case 'SCREENING_REJECTION':
       return {
         subject: `Update on your application for ${v.jobTitle}`,

@@ -4,6 +4,9 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { CandidateStatusBadge } from "@/components/StatusBadge";
 import { LoadingState, ErrorState } from "@/components/AsyncState";
+import { Timeline } from "@/components/Timeline";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
 import { apiFetch, ApiError } from "@/lib/api";
 
 const BASE_POLL_MS = 3000;
@@ -90,26 +93,35 @@ export default function StatusPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-lg p-6">
-      <h1 className="text-2xl font-bold">Application Status</h1>
-      <div className="mt-3">
-        <CandidateStatusBadge status={status.candidateStatus} />
-      </div>
-      <p className="mt-4">{status.message}</p>
-      {status.applicationStatus === "APPLIED" && (
-        <p className="mt-2 text-sm text-gray-400">
-          This page updates automatically — no need to refresh.
-        </p>
-      )}
+    <main className="mx-auto flex min-h-screen w-full max-w-lg items-center p-6">
+      <Card className="w-full">
+        <h1 className="font-heading text-xl font-semibold text-text-primary">
+          Application Status
+        </h1>
+        <div className="mt-3">
+          <CandidateStatusBadge status={status.candidateStatus} />
+        </div>
 
-      {(status.applicationStatus === "INTERVIEW_PENDING" || status.currentQuestion) && (
-        <button
-          onClick={() => router.push(`/interview/${applicationId}`)}
-          className="mt-4 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-        >
-          {status.currentQuestion ? "Resume Interview" : "Start Interview"}
-        </button>
-      )}
+        <div className="mt-6">
+          <Timeline status={status.applicationStatus} />
+        </div>
+
+        <p className="mt-6 text-sm text-text-secondary">{status.message}</p>
+        {status.applicationStatus === "APPLIED" && (
+          <p className="mt-2 text-xs text-text-muted">
+            This page updates automatically — no need to refresh.
+          </p>
+        )}
+
+        {(status.applicationStatus === "INTERVIEW_PENDING" || status.currentQuestion) && (
+          <Button
+            onClick={() => router.push(`/interview/${applicationId}`)}
+            className="mt-6"
+          >
+            {status.currentQuestion ? "Resume Interview" : "Start Interview"}
+          </Button>
+        )}
+      </Card>
     </main>
   );
 }

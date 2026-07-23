@@ -12,11 +12,23 @@ import {
 } from 'class-validator';
 
 const WORK_MODELS = ['REMOTE', 'HYBRID', 'ONSITE'] as const;
-const JOB_STATUSES = ['DRAFT', 'PUBLISHED', 'CLOSED', 'ARCHIVED'] as const;
+const JOB_STATUSES = [
+  'DRAFT',
+  'PUBLISHED',
+  'PAUSED',
+  'CLOSED',
+  'ARCHIVED',
+] as const;
 
 export class UpdateJobPostingDto {
   @ApiPropertyOptional() @IsOptional() @IsString() title?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
+
+  @ApiPropertyOptional({ type: [String] })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  responsibilities?: string[];
 
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()

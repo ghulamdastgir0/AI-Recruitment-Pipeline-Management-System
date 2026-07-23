@@ -43,20 +43,20 @@ export function Timeline({ status }: { status: string }) {
         const isTerminalMarker = isTerminal && isCurrent;
 
         const dotClass = isTerminalMarker
-          ? "bg-red-600"
+          ? "bg-danger"
           : isCurrent
-            ? "bg-blue-600"
+            ? "bg-brand-600"
             : isPast
-              ? "bg-green-600"
-              : "bg-gray-300";
+              ? "bg-success"
+              : "bg-black/15";
 
         const textClass = isSkipped
-          ? "text-gray-300"
+          ? "text-text-muted/60"
           : isCurrent
-            ? "font-medium text-gray-900"
+            ? "font-medium text-text-primary"
             : isPast
-              ? "text-gray-600"
-              : "text-gray-400";
+              ? "text-text-secondary"
+              : "text-text-muted";
 
         return (
           <div
@@ -73,7 +73,7 @@ export function Timeline({ status }: { status: string }) {
             {index < STAGES.length - 1 && (
               <span
                 className={`hidden h-px flex-1 sm:block ${
-                  isPast ? "bg-green-600" : "bg-gray-200"
+                  isPast ? "bg-success" : "bg-border"
                 }`}
                 aria-hidden
               />

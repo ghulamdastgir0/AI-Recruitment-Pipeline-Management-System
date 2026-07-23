@@ -51,6 +51,9 @@ function toPublicDto(job: JobPostingWithSkills): PublicJobPostingDto {
     candidateSummary:
       job.candidateSummary ??
       'Details for this role will be shared during the application process.',
+    responsibilities: job.responsibilities,
+    requiredSkills: job.requiredSkills,
+    preferredSkills: job.preferredSkills,
     salaryMax: job.salaryMax,
     deadline: job.deadline,
     location: job.location,

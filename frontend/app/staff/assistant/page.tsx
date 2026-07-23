@@ -3,6 +3,9 @@
 import { type FormEvent, useState } from "react";
 import { RoleGuard } from "@/components/RoleGuard";
 import { StaffNav } from "@/components/StaffNav";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { Input } from "@/components/ui/Input";
 import { apiFetch, ApiError, postJson } from "@/lib/api";
 
 interface ChatTurn {
@@ -94,12 +97,20 @@ function AssistantChat() {
   return (
     <>
       <StaffNav />
-      <main className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-6">
-        <h1 className="text-2xl font-bold">Assistant</h1>
+      <main className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-6 py-8">
+        <div>
+          <h1 className="font-heading text-2xl font-semibold text-text-primary">
+            Recruitment Assistant
+          </h1>
+          <p className="mt-1 text-sm text-text-muted">
+            Draft job postings, screen candidates, and get answers on company
+            policy — sensitive actions always ask for confirmation first.
+          </p>
+        </div>
 
-        <div className="flex min-h-[300px] flex-col gap-3 rounded-lg border border-gray-200 p-4">
+        <Card className="flex min-h-[400px] flex-col gap-3 p-4">
           {turns.length === 0 && (
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-text-muted">
               Ask the assistant to create job postings, look up candidates, or
               rank applicants for a role.
             </p>
@@ -109,8 +120,8 @@ function AssistantChat() {
               key={index}
               className={
                 turn.role === "user"
-                  ? "self-end rounded-lg bg-blue-600 px-3 py-2 text-sm text-white"
-                  : "self-start rounded-lg bg-gray-100 px-3 py-2 text-sm text-gray-800"
+                  ? "self-end rounded-2xl rounded-br-sm bg-brand-600 px-3.5 py-2 text-sm text-white"
+                  : "self-start rounded-2xl rounded-bl-sm bg-black/5 px-3.5 py-2 text-sm text-text-primary"
               }
             >
               {turn.content}
@@ -118,49 +129,46 @@ function AssistantChat() {
           ))}
 
           {pendingAction && (
-            <div className="self-start rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm">
-              <p className="font-medium text-amber-800">
+            <div className="self-start rounded-[var(--radius-control)] border border-warning/40 bg-warning-soft p-3 text-sm">
+              <p className="font-medium text-warning-text">
                 Confirm action: {pendingAction.tool}
               </p>
-              <pre className="mt-1 overflow-x-auto text-xs text-amber-700">
+              <pre className="mt-1 overflow-x-auto text-xs text-warning-text">
                 {JSON.stringify(pendingAction.args, null, 2)}
               </pre>
               <div className="mt-2 flex gap-2">
-                <button
+                <Button
                   onClick={confirmAction}
                   disabled={sending}
-                  className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                  className="px-3 py-1 text-xs"
                 >
                   Confirm
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="secondary"
                   onClick={cancelAction}
                   disabled={sending}
-                  className="rounded border border-gray-300 px-3 py-1 text-xs hover:bg-gray-50 disabled:opacity-50"
+                  className="px-3 py-1 text-xs"
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
             </div>
           )}
-        </div>
+        </Card>
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-danger">{error}</p>}
 
         <form onSubmit={send} className="flex gap-2">
-          <input
+          <Input
             value={input}
             onChange={(event) => setInput(event.target.value)}
             placeholder="Message the assistant…"
-            className="flex-1 rounded border border-gray-300 px-3 py-2"
+            className="flex-1"
           />
-          <button
-            type="submit"
-            disabled={sending || !input.trim()}
-            className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
+          <Button type="submit" disabled={sending || !input.trim()}>
             {sending ? "Sending…" : "Send"}
-          </button>
+          </Button>
         </form>
       </main>
     </>

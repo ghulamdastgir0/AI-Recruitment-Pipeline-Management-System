@@ -37,6 +37,16 @@ export class CreateJobPostingDto {
   @IsString()
   description?: string;
 
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'Bullet-point responsibilities. If omitted while `description` is also omitted, drafted from company policy/tech-stack documents alongside the description.',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  responsibilities?: string[];
+
   @ApiPropertyOptional({ type: [String], example: ['NestJS', 'PostgreSQL'] })
   @IsOptional()
   @IsArray()

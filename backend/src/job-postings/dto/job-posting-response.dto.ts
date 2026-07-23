@@ -4,8 +4,11 @@ export class JobPostingResponseDto {
   @ApiProperty() id!: string;
   @ApiProperty() title!: string;
   @ApiProperty() description!: string;
-  @ApiProperty({ enum: ['DRAFT', 'PUBLISHED', 'CLOSED', 'ARCHIVED'] })
+  @ApiProperty({
+    enum: ['DRAFT', 'PUBLISHED', 'PAUSED', 'CLOSED', 'ARCHIVED'],
+  })
   status!: string;
+  @ApiProperty({ type: [String] }) responsibilities!: string[];
   @ApiProperty({ type: [String] }) requiredSkills!: string[];
   @ApiProperty({ type: [String] }) preferredSkills!: string[];
   @ApiProperty() experienceMin!: number;

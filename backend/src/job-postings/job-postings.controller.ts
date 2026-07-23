@@ -1,7 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -104,5 +107,44 @@ export class JobPostingsController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<JobPostingResponseDto> {
     return this.jobPostings.publish(id, user.id);
+  }
+
+  @Post(':id/pause')
+  @ApiOperation({
+    summary:
+      'Pause a published job posting (sets status=PAUSED). Immediately hidden from the public job list; existing applications are untouched. Resume with :id/resume.',
+  })
+  @ApiResponse({ status: 200, type: JobPostingResponseDto })
+  async pause(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<JobPostingResponseDto> {
+    return this.jobPostings.pause(id, user.id);
+  }
+
+  @Post(':id/resume')
+  @ApiOperation({
+    summary: 'Resume a paused job posting (sets status=PUBLISHED).',
+  })
+  @ApiResponse({ status: 200, type: JobPostingResponseDto })
+  async resume(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<JobPostingResponseDto> {
+    return this.jobPostings.resume(id, user.id);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary:
+      'Permanently delete a job posting and every application/interview/match record tied to it. Irreversible.',
+  })
+  @ApiResponse({ status: 204 })
+  async remove(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<void> {
+    await this.jobPostings.delete(id, user.id);
   }
 }

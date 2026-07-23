@@ -4,6 +4,10 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { type FormEvent, useEffect, useState } from "react";
 import { LoadingState, ErrorState } from "@/components/AsyncState";
+import { JobPostingView } from "@/components/JobPostingView";
+import { Button } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { Input, Label } from "@/components/ui/Input";
 import { API_BASE_URL, apiFetch, ApiError } from "@/lib/api";
 
 const COMPANY_NAME =
@@ -13,6 +17,9 @@ interface PublicJob {
   id: string;
   title: string;
   candidateSummary?: string | null;
+  responsibilities: string[];
+  requiredSkills: string[];
+  preferredSkills: string[];
   location?: string | null;
   seniority?: string | null;
   workModel?: string | null;
@@ -77,88 +84,117 @@ export default function JobDetailPage() {
     }
   }
 
-  if (loadError) return <ErrorState message={loadError} />;
-  if (!job) return <LoadingState />;
-
-  const summaryParagraphs =
-    job.candidateSummary
-      ?.split(/\n{2,}/)
-      .map((paragraph) => paragraph.trim())
-      .filter(Boolean) ?? [];
+  if (loadError) {
+    return (
+      <main className="mx-auto w-full max-w-2xl p-6">
+        <ErrorState message={loadError} />
+      </main>
+    );
+  }
+  if (!job) {
+    return (
+      <main className="mx-auto w-full max-w-2xl p-6">
+        <LoadingState />
+      </main>
+    );
+  }
 
   return (
-    <main className="mx-auto w-full max-w-2xl p-6">
-      <p className="text-sm font-medium text-gray-500">{COMPANY_NAME}</p>
-      <h1 className="mt-1 text-2xl font-bold">{job.title}</h1>
-      <p className="mt-1 text-sm text-gray-600">
-        {[job.location, job.seniority, job.workModel].filter(Boolean).join(" · ")}
-      </p>
-      {summaryParagraphs.length > 0 && (
-        <div className="mt-4 flex flex-col gap-3">
-          {summaryParagraphs.map((paragraph, index) => (
-            <p key={index} className="text-gray-800">
-              {paragraph}
+    <main className="mx-auto w-full max-w-2xl px-6 py-10">
+      <Link href="/" className="text-sm font-medium text-brand-700 hover:underline">
+        ← {COMPANY_NAME}
+      </Link>
+
+      <div className="mt-6">
+        <JobPostingView
+          job={{
+            title: job.title,
+            description: job.candidateSummary ?? "",
+            responsibilities: job.responsibilities,
+            requiredSkills: job.requiredSkills,
+            preferredSkills: job.preferredSkills,
+            location: job.location,
+            workModel: job.workModel,
+          }}
+        />
+      </div>
+
+      <div className="mt-10">
+        {result ? (
+          <Card className="border-success/30 bg-success-soft text-center">
+            <p className="font-medium text-success-text">
+              Your application has been received successfully.
             </p>
-          ))}
-        </div>
-      )}
-
-      <hr className="my-6 border-gray-200" />
-
-      {result ? (
-        <div className="rounded-lg border border-green-300 bg-green-50 p-4">
-          <p className="font-medium text-green-800">
-            Your application has been received successfully.
-          </p>
-          <Link
-            href={`/status/${result.applicationId}`}
-            className="mt-3 inline-block rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-          >
-            Track your application
-          </Link>
-        </div>
-      ) : (
-        <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <h2 className="text-lg font-semibold">Apply</h2>
-          <input
-            required
-            placeholder="Full name"
-            value={candidateName}
-            onChange={(event) => setCandidateName(event.target.value)}
-            className="rounded border border-gray-300 px-3 py-2"
-          />
-          <input
-            required
-            type="email"
-            placeholder="Email address"
-            value={candidateEmail}
-            onChange={(event) => setCandidateEmail(event.target.value)}
-            className="rounded border border-gray-300 px-3 py-2"
-          />
-          <input
-            required
-            type="tel"
-            placeholder="Phone number"
-            value={candidatePhone}
-            onChange={(event) => setCandidatePhone(event.target.value)}
-            className="rounded border border-gray-300 px-3 py-2"
-          />
-          <input
-            type="file"
-            accept="application/pdf"
-            required
-            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-          />
-          {submitError && <p className="text-sm text-red-600">{submitError}</p>}
-          <button
-            type="submit"
-            disabled={!file || submitting}
-            className="self-start rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {submitting ? "Submitting…" : "Submit Application"}
-          </button>
-        </form>
-      )}
+            <p className="mt-1 text-sm text-success-text">
+              We&apos;ve emailed you a confirmation with a link to track your
+              status.
+            </p>
+            <Link
+              href={`/status/${result.applicationId}`}
+              className="mt-4 inline-block rounded-[var(--radius-control)] bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700"
+            >
+              Track your application
+            </Link>
+          </Card>
+        ) : (
+          <Card>
+            <h2 className="font-heading text-lg font-semibold text-text-primary">
+              Apply for this role
+            </h2>
+            <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="candidateName">Full name</Label>
+                <Input
+                  id="candidateName"
+                  required
+                  placeholder="Jane Doe"
+                  value={candidateName}
+                  onChange={(event) => setCandidateName(event.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="candidateEmail">Email address</Label>
+                <Input
+                  id="candidateEmail"
+                  required
+                  type="email"
+                  placeholder="jane@example.com"
+                  value={candidateEmail}
+                  onChange={(event) => setCandidateEmail(event.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="candidatePhone">Phone number</Label>
+                <Input
+                  id="candidatePhone"
+                  required
+                  type="tel"
+                  placeholder="+1 555 010 0100"
+                  value={candidatePhone}
+                  onChange={(event) => setCandidatePhone(event.target.value)}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="cv">Résumé (PDF)</Label>
+                <div className="rounded-[var(--radius-control)] border border-dashed border-border bg-surface px-3 py-4 text-center text-sm text-text-muted">
+                  <input
+                    id="cv"
+                    type="file"
+                    accept="application/pdf"
+                    required
+                    onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                    className="text-sm"
+                  />
+                </div>
+              </div>
+              {submitError && <p className="text-sm text-danger">{submitError}</p>}
+              <Button type="submit" disabled={!file || submitting} className="self-start">
+                {submitting ? "Submitting…" : "Submit Application"}
+              </Button>
+            </form>
+          </Card>
+        )}
+      </div>
     </main>
   );
 }

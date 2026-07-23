@@ -172,10 +172,13 @@ model Job {
   rawPrompt            String                      @db.Text
   generatedDescription String                      @db.Text
   description          String                      @db.Text
-  // Short, candidate-safe summary (role + high-level responsibilities only —
-  // never specific required skills/years/scoring criteria) shown on the
-  // public apply page instead of the full internal `description`.
+  // Short narrative summary (role overview) shown on the public apply page
+  // alongside the structured Responsibilities/Required Skills/Preferred
+  // Qualifications sections — see FR job-page format.
   candidateSummary     String?                     @db.Text
+  // Structured bullet list (string[]) — part of the standardized job-page
+  // format alongside requiredSkills/preferredSkills (JobSkill).
+  responsibilities     Json?
   embedding            Unsupported("vector(384)")?
 
   experienceMin Int
@@ -490,6 +493,7 @@ enum DocumentStatus {
 enum JobStatus {
   DRAFT
   PUBLISHED
+  PAUSED
   CLOSED
   ARCHIVED
 }
@@ -520,6 +524,7 @@ enum IntStatus {
 }
 
 enum EmailType {
+  APPLICATION_RECEIVED
   SCREENING_REJECTION
   INTERVIEW_ACKNOWLEDGEMENT
   INTERVIEW_REMINDER
