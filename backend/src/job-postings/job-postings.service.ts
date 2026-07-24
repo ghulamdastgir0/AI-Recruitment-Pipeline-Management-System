@@ -4,12 +4,28 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AuditLogService } from '../audit/audit-log.service';
+import { resolveCandidateIdentity } from '../candidates/candidate-identity.util';
 import { DocumentRetrievalService } from '../documents/services/document-retrieval.service';
+import { AppStatus } from '../generated/prisma/enums';
+import { EmailService } from '../shared/email/email.service';
 import { EmbeddingsService } from '../shared/embeddings/embeddings.service';
 import { LlmClientService } from '../shared/llm/llm-client.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateJobPostingDto } from './dto/create-job-posting.dto';
 import { UpdateJobPostingDto } from './dto/update-job-posting.dto';
+
+// Applications still "in flight" when a job posting closes — a candidate
+// who already reached a terminal outcome (selected, rejected, hired, next
+// round, withdrawn, screened out, or interview-expired) keeps that outcome;
+// only these get swept into a bulk rejection.
+const IN_FLIGHT_APPLICATION_STATUSES: AppStatus[] = [
+  'APPLIED',
+  'SCREENING',
+  'INTERVIEW_PENDING',
+  'IN_REVIEW',
+  'MANAGER_REVIEW',
+  'MANAGER_REVIEWED',
+];
 
 // Shared shape instructions for the candidate-facing summary, used by both
 // the combined drafting prompt and the standalone re-summarize prompt so the
@@ -62,6 +78,7 @@ export class JobPostingsService {
     private readonly llm: LlmClientService,
     private readonly embeddings: EmbeddingsService,
     private readonly audit: AuditLogService,
+    private readonly email: EmailService,
   ) {}
 
   async create(
@@ -120,7 +137,19 @@ export class JobPostingsService {
     changes: UpdateJobPostingDto,
     actorUserId: string,
   ): Promise<JobPostingWithSkills> {
-    await this.getById(id); // throws NotFoundException if missing
+    const current = await this.getById(id); // throws NotFoundException if missing
+
+    // The "assign a Hiring Manager before publishing" rule used to be
+    // enforced only in publish() — this generic PATCH path (also the exact
+    // method the assistant's updateJobPosting tool calls) could set
+    // status: 'PUBLISHED' directly and skip it entirely. Sharing the same
+    // guard here closes that gap regardless of which write path is used.
+    if (
+      changes.status === 'PUBLISHED' &&
+      current.status !== 'PUBLISHED'
+    ) {
+      await this.assertHiringManagerAssigned(id);
+    }
 
     const candidateSummary =
       changes.description !== undefined
@@ -158,7 +187,20 @@ export class JobPostingsService {
         ...(changes.workModel !== undefined
           ? { workModel: changes.workModel }
           : {}),
-        ...(changes.status !== undefined ? { status: changes.status } : {}),
+        ...(changes.status !== undefined
+          ? {
+              status: changes.status,
+              // Mirrors publish()/pause()'s own timestamp bookkeeping so a
+              // status change routed through this generic path doesn't
+              // silently skip it.
+              ...(changes.status === 'PUBLISHED' && current.status !== 'PUBLISHED'
+                ? { portalPublishedAt: new Date() }
+                : {}),
+              ...(changes.status === 'PAUSED' && current.status !== 'PAUSED'
+                ? { portalUnpublishedAt: new Date() }
+                : {}),
+            }
+          : {}),
       },
     });
 
@@ -189,15 +231,7 @@ export class JobPostingsService {
   ): Promise<JobPostingWithSkills> {
     const job = await this.getById(id);
     if (job.status !== 'PUBLISHED') {
-      const hiringManagerCount =
-        await this.prisma.jobPostingHiringManager.count({
-          where: { jobId: id },
-        });
-      if (hiringManagerCount === 0) {
-        throw new BadRequestException(
-          'Assign at least one Hiring Manager before publishing this job posting.',
-        );
-      }
+      await this.assertHiringManagerAssigned(id);
 
       await this.prisma.job.update({
         where: { id },
@@ -266,6 +300,115 @@ export class JobPostingsService {
   }
 
   /**
+   * Hides the posting from the public list and stops taking new applicants,
+   * with real side effects (unlike the old bare status-field PATCH): stamps
+   * portalUnpublishedAt, and bulk-rejects every application still in flight
+   * with a BULK_REJECTION email — a candidate whose application already
+   * reached a real outcome (selected/hired/rejected/etc.) is left alone.
+   */
+  async close(id: string, actorUserId: string): Promise<JobPostingWithSkills> {
+    const job = await this.getById(id);
+    if (job.status === 'CLOSED') return job;
+    if (job.status === 'ARCHIVED') {
+      throw new BadRequestException(
+        `Cannot close an archived job posting (current status: ${job.status}).`,
+      );
+    }
+
+    await this.prisma.job.update({
+      where: { id },
+      data: { status: 'CLOSED', portalUnpublishedAt: new Date() },
+    });
+    await this.bulkRejectInFlightApplications(id, job.title, actorUserId);
+    await this.audit.record({
+      actorUserId,
+      action: 'job_posting.closed',
+      resourceType: 'Job',
+      resourceId: id,
+    });
+    return this.getById(id);
+  }
+
+  /** Archives a closed posting — purely a status change, no further side effects (the bulk rejection already happened at close time). */
+  async archive(id: string, actorUserId: string): Promise<JobPostingWithSkills> {
+    const job = await this.getById(id);
+    if (job.status === 'ARCHIVED') return job;
+    if (job.status !== 'CLOSED') {
+      throw new BadRequestException(
+        `Only a closed job posting can be archived (current status: ${job.status}).`,
+      );
+    }
+
+    await this.prisma.job.update({
+      where: { id },
+      data: { status: 'ARCHIVED' },
+    });
+    await this.audit.record({
+      actorUserId,
+      action: 'job_posting.archived',
+      resourceType: 'Job',
+      resourceId: id,
+    });
+    return this.getById(id);
+  }
+
+  /**
+   * Called once per successful offer letter (see HiringDecisionsService.
+   * sendOfferLetter) — the only place Job.hiredCount is ever incremented.
+   * Auto-closes (with the same bulk-rejection side effects as a manual
+   * close()) the moment the hiring target is met, per the schema's own
+   * "hit hiring target -> auto-close and bulk-reject remaining candidates"
+   * comment on BULK_REJECTION/hiredCount.
+   */
+  async incrementHiredCountAndMaybeAutoClose(
+    id: string,
+    actorUserId: string,
+  ): Promise<void> {
+    const job = await this.prisma.job.update({
+      where: { id },
+      data: { hiredCount: { increment: 1 } },
+    });
+    if (job.hiredCount >= job.hiringTarget && job.status === 'PUBLISHED') {
+      await this.close(id, actorUserId);
+    }
+  }
+
+  private async bulkRejectInFlightApplications(
+    jobId: string,
+    jobTitle: string,
+    actorUserId: string,
+  ): Promise<void> {
+    const applications = await this.prisma.application.findMany({
+      where: { jobId, status: { in: IN_FLIGHT_APPLICATION_STATUSES } },
+      include: { candidateProfile: true },
+    });
+
+    for (const application of applications) {
+      await this.prisma.application.update({
+        where: { id: application.id },
+        data: { status: 'REJECTED' },
+      });
+
+      const { name: candidateName, email: candidateEmail } =
+        resolveCandidateIdentity(application.candidateProfile);
+      const sent = await this.email.send({
+        to: candidateEmail,
+        type: 'BULK_REJECTION',
+        variables: { candidateName, jobTitle },
+      });
+      if (sent) {
+        await this.prisma.emailLog.create({
+          data: {
+            applicationId: application.id,
+            type: 'BULK_REJECTION',
+            triggeredByUserId: actorUserId,
+          },
+        });
+      }
+    }
+  }
+
+  /**
    * Permanently removes the posting and everything tied to it — every
    * Application against it, and (via Application's own cascade) each one's
    * AIInterviewSession/AIInterviewQuestion/CandidateSkillGrade, EmailLog, and
@@ -302,7 +445,15 @@ export class JobPostingsService {
     status?: string;
     /** When set (Hiring Managers), only jobs this user is assigned to are returned. */
     assignedToUserId?: string;
+    /** Case-insensitive title search, pushed to the DB instead of the staff UI filtering an already-fetched full list. */
+    search?: string;
+    /** 1-based page number; requires pageSize to take effect. */
+    page?: number;
+    pageSize?: number;
   }): Promise<JobPostingWithSkills[]> {
+    const pageSize = filter.pageSize;
+    const page = filter.page && filter.page > 0 ? filter.page : 1;
+
     const jobs = await this.prisma.job.findMany({
       where: {
         ...(filter.status ? { status: filter.status as never } : {}),
@@ -313,9 +464,40 @@ export class JobPostingsService {
               },
             }
           : {}),
+        ...(filter.search
+          ? { title: { contains: filter.search, mode: 'insensitive' } }
+          : {}),
       },
       include: { jobSkills: { include: { skill: true } } },
       orderBy: { createdAt: 'desc' },
+      ...(pageSize ? { skip: (page - 1) * pageSize, take: pageSize } : {}),
+    });
+    return jobs.map(toJobPostingWithSkills);
+  }
+
+  /** Shared by publish() and update() (status -> PUBLISHED) so the rule can't be bypassed by whichever write path is used. */
+  private async assertHiringManagerAssigned(id: string): Promise<void> {
+    const hiringManagerCount = await this.prisma.jobPostingHiringManager.count(
+      { where: { jobId: id } },
+    );
+    if (hiringManagerCount === 0) {
+      throw new BadRequestException(
+        'Assign at least one Hiring Manager before publishing this job posting.',
+      );
+    }
+  }
+
+  /**
+   * Case-insensitive lookup by title for the assistant's job-lookup tool —
+   * lets HR refer to "the Backend Developer role" by name instead of
+   * needing to recall/re-paste a raw UUID across conversation turns.
+   */
+  async search(query: string): Promise<JobPostingWithSkills[]> {
+    const jobs = await this.prisma.job.findMany({
+      where: { title: { contains: query, mode: 'insensitive' } },
+      include: { jobSkills: { include: { skill: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
     });
     return jobs.map(toJobPostingWithSkills);
   }

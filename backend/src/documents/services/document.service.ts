@@ -10,7 +10,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { Document } from '../../generated/prisma/client';
 import { DocumentStatus } from '../../generated/prisma/enums';
 import { BackgroundJobQueueService } from '../../shared/background-jobs/background-job-queue.service';
-import { DocumentProcessorService } from './document-processor.service';
+import { DOCUMENT_PROCESSING_JOB_TYPE } from './document-processor.service';
 import { FileStorageService } from './file-storage.service';
 
 export interface UploadedPdf {
@@ -26,7 +26,6 @@ export class DocumentService {
     private readonly prisma: PrismaService,
     private readonly storage: FileStorageService,
     private readonly jobQueue: BackgroundJobQueueService,
-    private readonly processor: DocumentProcessorService,
     private readonly audit: AuditLogService,
   ) {}
 
@@ -198,7 +197,7 @@ export class DocumentService {
       },
     });
 
-    this.jobQueue.enqueue(() => this.processor.process(document.id));
+    await this.jobQueue.enqueue(DOCUMENT_PROCESSING_JOB_TYPE, document.id);
 
     return document;
   }

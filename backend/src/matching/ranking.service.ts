@@ -53,7 +53,22 @@ export class RankingService {
     const applications = await this.prisma.application.findMany({
       where: { jobId: jobPostingId },
       include: {
-        candidateProfile: true,
+        // Only the fields resolveCandidateIdentity()/pendingSummary() below
+        // actually need — not the full CandidateProfile row. This list can
+        // run against every applicant on a job, so pulling each one's full
+        // resumeText/resumePagesJson/resumeEmbedding here (as `true` used to)
+        // was pure waste once scoring has already happened and been stored
+        // in MatchResult.
+        candidateProfile: {
+          select: {
+            candidateName: true,
+            candidateEmail: true,
+            candidatePhone: true,
+            extractedDataJson: true,
+            cvStatus: true,
+            cvProcessingError: true,
+          },
+        },
         matchResults: { orderBy: { processedAt: 'desc' }, take: 1 },
       },
       orderBy: { createdAt: 'desc' },

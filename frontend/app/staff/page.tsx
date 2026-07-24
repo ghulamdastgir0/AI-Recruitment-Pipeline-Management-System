@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { EmptyState, ErrorState, LoadingState } from "@/components/AsyncState";
 import { RoleGuard } from "@/components/RoleGuard";
 import { StaffNav } from "@/components/StaffNav";
@@ -176,8 +176,11 @@ function StaffDashboard() {
   const [busyJobId, setBusyJobId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
-  function loadJobs() {
-    apiFetch<JobPosting[]>("/job-postings")
+  function loadJobs(query: string) {
+    const params = new URLSearchParams();
+    if (query.trim()) params.set("search", query.trim());
+    const qs = params.toString();
+    apiFetch<JobPosting[]>(`/job-postings${qs ? `?${qs}` : ""}`)
       .then(setJobs)
       .catch((err) =>
         setError(err instanceof ApiError ? err.message : "Failed to load jobs."),
@@ -185,28 +188,22 @@ function StaffDashboard() {
   }
 
   useEffect(() => {
-    loadJobs();
-  }, []);
+    // Pushed server-side (title search) instead of fetching every job
+    // posting and filtering client-side — debounced so each keystroke
+    // doesn't fire its own request.
+    const timeoutId = setTimeout(() => loadJobs(search), 300);
+    return () => clearTimeout(timeoutId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadJobs is stable per render
+  }, [search]);
 
   const canManage = user?.role === "SUPER_ADMIN" || user?.role === "HR_ADMIN";
-
-  const visibleJobs = useMemo(() => {
-    if (!jobs) return jobs;
-    const query = search.trim().toLowerCase();
-    if (!query) return jobs;
-    return jobs.filter((job) =>
-      [job.title, job.location, job.seniority, job.workModel]
-        .filter(Boolean)
-        .some((field) => field!.toLowerCase().includes(query)),
-    );
-  }, [jobs, search]);
 
   async function pauseOrResume(jobId: string, action: "pause" | "resume") {
     setBusyJobId(jobId);
     setError(null);
     try {
       await postJson(`/job-postings/${jobId}/${action}`, {});
-      loadJobs();
+      loadJobs(search);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : `Failed to ${action} job.`);
     } finally {
@@ -226,7 +223,7 @@ function StaffDashboard() {
     setError(null);
     try {
       await deleteRequest(`/job-postings/${jobId}`);
-      loadJobs();
+      loadJobs(search);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to delete job.");
     } finally {
@@ -264,10 +261,10 @@ function StaffDashboard() {
           />
         )}
 
-        {jobs && jobs.length > 0 && (
+        {jobs !== null && (
           <div className="mt-6">
             <Input
-              placeholder="Search by title, location, or work model…"
+              placeholder="Search by title…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="max-w-sm"
@@ -282,17 +279,18 @@ function StaffDashboard() {
         )}
         {jobs?.length === 0 && (
           <div className="mt-6">
-            <EmptyState label="No job postings to show yet." />
-          </div>
-        )}
-        {jobs && jobs.length > 0 && visibleJobs?.length === 0 && (
-          <div className="mt-6">
-            <EmptyState label="No job postings match your search." />
+            <EmptyState
+              label={
+                search.trim()
+                  ? "No job postings match your search."
+                  : "No job postings to show yet."
+              }
+            />
           </div>
         )}
 
         <div className="mt-6 flex flex-col gap-3">
-          {visibleJobs?.map((job) => (
+          {jobs?.map((job) => (
             <Card key={job.id} className="p-4">
               <div className="flex items-center justify-between gap-3">
                 <Link

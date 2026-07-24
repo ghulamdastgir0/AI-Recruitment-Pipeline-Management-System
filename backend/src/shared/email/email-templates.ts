@@ -15,6 +15,8 @@ export interface EmailVariables {
   nextRoundTime?: Date;
   /** HR-provided deadline to respond/schedule the next round (NEXT_ROUND). */
   nextRoundDeadline?: Date;
+  /** Optional free-text HR added to the offer (start date, comp, next steps) (OFFER_LETTER). */
+  offerDetails?: string;
 }
 
 export interface EmailContent {
@@ -126,6 +128,17 @@ export function buildEmail(type: EmailType, v: EmailVariables): EmailContent {
           <p>${greet(v.candidateName)}</p>
           <p>Thank you for your interest in the <strong>${v.jobTitle}</strong> position, which is now closed.</p>
           <p>We've decided not to move forward with your application for this particular role, and encourage you to apply again in the future.</p>
+        `),
+      };
+
+    case 'OFFER_LETTER':
+      return {
+        subject: `Your offer for ${v.jobTitle}`,
+        html: wrap(`
+          <p>${greet(v.candidateName)}</p>
+          <p>We're delighted to formally offer you the <strong>${v.jobTitle}</strong> position. Welcome to the team!</p>
+          ${v.offerDetails ? `<p>${v.offerDetails}</p>` : ''}
+          <p>Our team will follow up shortly with your formal offer letter and next steps.</p>
         `),
       };
   }

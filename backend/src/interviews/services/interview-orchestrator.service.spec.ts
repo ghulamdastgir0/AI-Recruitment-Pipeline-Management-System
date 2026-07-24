@@ -188,6 +188,8 @@ describe('InterviewOrchestratorService', () => {
               justification: 'Explained closures correctly.',
             },
           ],
+          recommendation: 'HIRE',
+          summary: 'Solid grasp of core JavaScript concepts.',
         }),
       );
 
@@ -215,6 +217,8 @@ describe('InterviewOrchestratorService', () => {
           justification: 'Explained closures correctly.',
         },
       ]);
+      expect(result.recommendation).toBe('HIRE');
+      expect(result.summary).toBe('Solid grasp of core JavaScript concepts.');
     });
 
     it('clamps out-of-range scores into 0-100', async () => {
@@ -229,6 +233,8 @@ describe('InterviewOrchestratorService', () => {
               justification: 'x',
             },
           ],
+          recommendation: 'NO_HIRE',
+          summary: 'Struggled with fundamentals.',
         }),
       );
 
@@ -258,6 +264,8 @@ describe('InterviewOrchestratorService', () => {
                 justification: 'Solid understanding overall.',
               },
             ],
+            recommendation: 'HIRE',
+            summary: 'Decent performance overall.',
           }),
         );
 

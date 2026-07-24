@@ -41,6 +41,9 @@ export default function JobDetailPage() {
   const [candidatePhone, setCandidatePhone] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [existingApplicationId, setExistingApplicationId] = useState<
+    string | null
+  >(null);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<UploadCvResult | null>(null);
 
@@ -57,6 +60,7 @@ export default function JobDetailPage() {
     if (!file) return;
     setSubmitting(true);
     setSubmitError(null);
+    setExistingApplicationId(null);
     try {
       const form = new FormData();
       form.append("jobPostingId", jobId);
@@ -74,6 +78,15 @@ export default function JobDetailPage() {
           body && typeof body === "object" && "message" in body
             ? String((body as { message: unknown }).message)
             : "Upload failed.";
+        if (
+          response.status === 409 &&
+          body &&
+          typeof body === "object" &&
+          "applicationId" in body &&
+          typeof (body as { applicationId: unknown }).applicationId === "string"
+        ) {
+          setExistingApplicationId((body as { applicationId: string }).applicationId);
+        }
         throw new Error(message);
       }
       setResult(body as UploadCvResult);
@@ -187,7 +200,23 @@ export default function JobDetailPage() {
                   />
                 </div>
               </div>
-              {submitError && <p className="text-sm text-danger">{submitError}</p>}
+              {submitError && (
+                <p className="text-sm text-danger">
+                  {submitError}
+                  {existingApplicationId && (
+                    <>
+                      {" "}
+                      <Link
+                        href={`/status/${existingApplicationId}`}
+                        className="font-medium underline hover:no-underline"
+                      >
+                        View your application status
+                      </Link>
+                      .
+                    </>
+                  )}
+                </p>
+              )}
               <Button type="submit" disabled={!file || submitting} className="self-start">
                 {submitting ? "Submitting…" : "Submit Application"}
               </Button>

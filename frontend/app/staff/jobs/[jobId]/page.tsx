@@ -36,6 +36,10 @@ interface JobPosting {
   status: string;
   requiredSkills: string[];
   preferredSkills: string[];
+  experienceMin: number;
+  salaryMax?: number | null;
+  deadline: string;
+  hiringTarget: number;
   location?: string | null;
   seniority?: string | null;
   workModel?: string | null;
@@ -59,6 +63,11 @@ function EditJobForm({
     requiredSkills: job.requiredSkills.join(", "),
     preferredSkills: job.preferredSkills.join(", "),
     location: job.location ?? "",
+    seniority: job.seniority ?? "",
+    workModel: job.workModel ?? "",
+    salaryMax: job.salaryMax != null ? String(job.salaryMax) : "",
+    hiringTarget: String(job.hiringTarget),
+    deadline: job.deadline ? job.deadline.slice(0, 10) : "",
   });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -84,6 +93,13 @@ function EditJobForm({
           .map((s) => s.trim())
           .filter(Boolean),
         location: form.location || undefined,
+        seniority: form.seniority || undefined,
+        workModel: form.workModel || undefined,
+        salaryMax: form.salaryMax ? Number(form.salaryMax) : undefined,
+        hiringTarget: form.hiringTarget ? Number(form.hiringTarget) : undefined,
+        deadline: form.deadline
+          ? new Date(form.deadline).toISOString()
+          : undefined,
       });
       onSaved();
     } catch (err) {
@@ -144,13 +160,73 @@ function EditJobForm({
             />
           </div>
         </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="edit-location">Location</Label>
-          <Input
-            id="edit-location"
-            value={form.location}
-            onChange={(e) => setForm({ ...form, location: e.target.value })}
-          />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="edit-location">Location</Label>
+            <Input
+              id="edit-location"
+              value={form.location}
+              onChange={(e) => setForm({ ...form, location: e.target.value })}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="edit-seniority">Seniority</Label>
+            <Input
+              id="edit-seniority"
+              placeholder="e.g. Senior"
+              value={form.seniority}
+              onChange={(e) => setForm({ ...form, seniority: e.target.value })}
+            />
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="edit-work-model">Work model</Label>
+            <select
+              id="edit-work-model"
+              value={form.workModel}
+              onChange={(e) => setForm({ ...form, workModel: e.target.value })}
+              className="rounded-[var(--radius-control)] border border-border bg-white px-3 py-2 text-sm text-text-primary focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-100"
+            >
+              <option value="">Unspecified</option>
+              <option value="REMOTE">Remote</option>
+              <option value="HYBRID">Hybrid</option>
+              <option value="ONSITE">Onsite</option>
+            </select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="edit-salary-max">Salary cap</Label>
+            <Input
+              id="edit-salary-max"
+              type="number"
+              min={0}
+              value={form.salaryMax}
+              onChange={(e) => setForm({ ...form, salaryMax: e.target.value })}
+            />
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="edit-hiring-target">Hiring target</Label>
+            <Input
+              id="edit-hiring-target"
+              type="number"
+              min={1}
+              required
+              value={form.hiringTarget}
+              onChange={(e) => setForm({ ...form, hiringTarget: e.target.value })}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="edit-deadline">Application deadline</Label>
+            <Input
+              id="edit-deadline"
+              type="date"
+              required
+              value={form.deadline}
+              onChange={(e) => setForm({ ...form, deadline: e.target.value })}
+            />
+          </div>
         </div>
         {error && <p className="text-sm text-danger">{error}</p>}
         <div className="flex gap-2">
@@ -286,6 +362,8 @@ function JobDetail() {
   const { user } = useAuth();
   const [job, setJob] = useState<JobPosting | null>(null);
   const [candidates, setCandidates] = useState<RankedCandidate[] | null>(null);
+  const [minScore, setMinScore] = useState("");
+  const [recommendation, setRecommendation] = useState("");
   const [assignedCount, setAssignedCount] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
@@ -306,17 +384,31 @@ function JobDetail() {
       });
   }
 
-  useEffect(() => {
-    loadJob();
-    apiFetch<RankedCandidate[]>(`/job-postings/${jobId}/candidates`)
+  function loadCandidates() {
+    const params = new URLSearchParams();
+    if (minScore) params.set("minScore", minScore);
+    if (recommendation) params.set("recommendation", recommendation);
+    const query = params.toString();
+    apiFetch<RankedCandidate[]>(
+      `/job-postings/${jobId}/candidates${query ? `?${query}` : ""}`,
+    )
       .then(setCandidates)
       .catch((err) =>
         setError(
           err instanceof ApiError ? err.message : "Failed to load candidates.",
         ),
       );
+  }
+
+  useEffect(() => {
+    loadJob();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadJob is stable per render
   }, [jobId]);
+
+  useEffect(() => {
+    loadCandidates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadCandidates is stable per render
+  }, [jobId, minScore, recommendation]);
 
   async function publish() {
     setPublishing(true);
@@ -499,9 +591,39 @@ function JobDetail() {
         <h2 className="mt-10 font-heading text-lg font-semibold text-text-primary">
           Candidates
         </h2>
+        <div className="mt-3 flex flex-wrap gap-3">
+          <select
+            value={minScore}
+            onChange={(event) => setMinScore(event.target.value)}
+            className="rounded-[var(--radius-control)] border border-border bg-white px-3 py-1.5 text-sm text-text-primary focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-100"
+          >
+            <option value="">Any score</option>
+            <option value="90">90+</option>
+            <option value="80">80+</option>
+            <option value="70">70+</option>
+            <option value="50">50+</option>
+          </select>
+          <select
+            value={recommendation}
+            onChange={(event) => setRecommendation(event.target.value)}
+            className="rounded-[var(--radius-control)] border border-border bg-white px-3 py-1.5 text-sm text-text-primary focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-100"
+          >
+            <option value="">Any recommendation</option>
+            <option value="STRONG_MATCH">Strong match</option>
+            <option value="POTENTIAL_MATCH">Potential match</option>
+            <option value="NEEDS_REVIEW">Needs review</option>
+            <option value="INSUFFICIENT_EVIDENCE">Insufficient evidence</option>
+          </select>
+        </div>
         {candidates?.length === 0 && (
           <div className="mt-3">
-            <EmptyState label="No candidates have applied yet." />
+            <EmptyState
+              label={
+                minScore || recommendation
+                  ? "No candidates match these filters."
+                  : "No candidates have applied yet."
+              }
+            />
           </div>
         )}
         <div className="mt-3 flex flex-col gap-3">

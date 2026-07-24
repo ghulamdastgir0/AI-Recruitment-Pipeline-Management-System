@@ -1,10 +1,11 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 import {
   ApiOperation,
   ApiProperty,
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 
@@ -25,6 +26,11 @@ export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
   @Post('login')
+  @UseGuards(ThrottlerGuard)
+  // Tight per-IP limit — login is the single most brute-forceable public
+  // endpoint (unlike CV upload/interview turns, nothing here was throttled
+  // at all before).
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @ApiOperation({ summary: 'Authenticate and receive a JWT bearer token.' })
   @ApiResponse({ status: 200, type: LoginResponseDto })
   @ApiResponse({ status: 401, description: 'Invalid email or password.' })

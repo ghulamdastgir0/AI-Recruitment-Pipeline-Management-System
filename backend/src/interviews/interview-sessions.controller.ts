@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   HttpStatus,
@@ -72,8 +73,9 @@ export class InterviewSessionsController {
   async answer(
     @Param('applicationId') applicationId: string,
     @UploadedFile(audioFileValidationPipe) file: Express.Multer.File,
+    @Body('questionId') questionId?: string,
   ): Promise<InterviewTurnView | InterviewResultView> {
-    return this.sessions.answer(applicationId, file);
+    return this.sessions.answer(applicationId, file, questionId);
   }
 
   @Get(':applicationId/status')

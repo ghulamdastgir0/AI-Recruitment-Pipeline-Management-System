@@ -10,6 +10,7 @@ import { StaffNav } from "@/components/StaffNav";
 import { Timeline } from "@/components/Timeline";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { Dialog } from "@/components/ui/Dialog";
 import { Textarea } from "@/components/ui/Input";
 import {
   apiFetch,
@@ -50,6 +51,8 @@ interface SkillGrade {
 interface Transcript {
   sessionStatus: string;
   overallScore: number | null;
+  recommendation: string | null;
+  summary: string | null;
   questions: TranscriptQuestion[];
   skillGrades: SkillGrade[];
 }
@@ -80,6 +83,7 @@ function CandidateDetail() {
   const [nextRoundDeadline, setNextRoundDeadline] = useState("");
   const [decisionMessage, setDecisionMessage] = useState<string | null>(null);
   const [decisionError, setDecisionError] = useState<string | null>(null);
+  const [submittingDecision, setSubmittingDecision] = useState(false);
 
   const [managerReviewMessage, setManagerReviewMessage] = useState<
     string | null
@@ -88,6 +92,16 @@ function CandidateDetail() {
     null,
   );
   const [movingToManagerReview, setMovingToManagerReview] = useState(false);
+
+  const [showReviewDialog, setShowReviewDialog] = useState(false);
+  const [reviewComment, setReviewComment] = useState("");
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [submittingReview, setSubmittingReview] = useState(false);
+
+  const [offerDetails, setOfferDetails] = useState("");
+  const [offerMessage, setOfferMessage] = useState<string | null>(null);
+  const [offerError, setOfferError] = useState<string | null>(null);
+  const [sendingOffer, setSendingOffer] = useState(false);
 
   function loadMatch() {
     apiFetch<MatchResult>(`/job-postings/${jobId}/candidates/${candidateId}/match`)
@@ -136,6 +150,8 @@ function CandidateDetail() {
 
   async function submitDecision(event: FormEvent) {
     event.preventDefault();
+    if (submittingDecision) return;
+    setSubmittingDecision(true);
     setDecisionError(null);
     setDecisionMessage(null);
     try {
@@ -154,6 +170,8 @@ function CandidateDetail() {
       setDecisionError(
         err instanceof ApiError ? err.message : "Failed to record decision.",
       );
+    } finally {
+      setSubmittingDecision(false);
     }
   }
 
@@ -174,6 +192,50 @@ function CandidateDetail() {
       );
     } finally {
       setMovingToManagerReview(false);
+    }
+  }
+
+  async function submitManagerReviewed(event: FormEvent) {
+    event.preventDefault();
+    if (submittingReview || !reviewComment.trim()) return;
+    setSubmittingReview(true);
+    setReviewError(null);
+    try {
+      await postJson(
+        `/job-postings/${jobId}/candidates/${candidateId}/manager-reviewed`,
+        { comment: reviewComment },
+      );
+      setShowReviewDialog(false);
+      setReviewComment("");
+      loadComments();
+      loadMatch();
+    } catch (err) {
+      setReviewError(
+        err instanceof ApiError ? err.message : "Failed to submit review.",
+      );
+    } finally {
+      setSubmittingReview(false);
+    }
+  }
+
+  async function sendOfferLetter(event: FormEvent) {
+    event.preventDefault();
+    if (sendingOffer) return;
+    setSendingOffer(true);
+    setOfferError(null);
+    setOfferMessage(null);
+    try {
+      await postJson(`/job-postings/${jobId}/candidates/${candidateId}/offer-letter`, {
+        ...(offerDetails.trim() ? { offerDetails: offerDetails.trim() } : {}),
+      });
+      setOfferMessage("Offer letter sent.");
+      loadMatch();
+    } catch (err) {
+      setOfferError(
+        err instanceof ApiError ? err.message : "Failed to send offer letter.",
+      );
+    } finally {
+      setSendingOffer(false);
     }
   }
 
@@ -279,6 +341,21 @@ function CandidateDetail() {
                 {transcript.overallScore !== null &&
                   ` · Overall score: ${transcript.overallScore}/100`}
               </p>
+              {(transcript.recommendation ?? transcript.summary) && (
+                <Card className="p-3">
+                  {transcript.recommendation && (
+                    <p className="font-medium text-text-primary">
+                      Interview recommendation:{" "}
+                      {transcript.recommendation.replaceAll("_", " ")}
+                    </p>
+                  )}
+                  {transcript.summary && (
+                    <p className="mt-1 text-sm text-text-secondary">
+                      {transcript.summary}
+                    </p>
+                  )}
+                </Card>
+              )}
               {transcript.questions.map((question) => (
                 <Card key={question.sequenceOrder} className="p-3">
                   <p className="text-xs text-text-muted">
@@ -339,6 +416,66 @@ function CandidateDetail() {
           )}
         </section>
 
+        {canComment && match?.applicationStatus === "MANAGER_REVIEW" && (
+          <Card className="mt-8">
+            <h2 className="font-heading text-base font-semibold text-text-primary">
+              Mark as Reviewed
+            </h2>
+            <p className="mt-1 text-sm text-text-secondary">
+              Add your review comment and hand this candidate off to HR for a
+              final decision.
+            </p>
+            <Button onClick={() => setShowReviewDialog(true)} className="mt-3">
+              Mark as Reviewed
+            </Button>
+          </Card>
+        )}
+
+        <Dialog
+          open={showReviewDialog}
+          onClose={() => {
+            if (submittingReview) return;
+            setShowReviewDialog(false);
+            setReviewError(null);
+          }}
+          title="Mark as Reviewed"
+        >
+          <form onSubmit={submitManagerReviewed} className="flex flex-col gap-3">
+            <p className="text-sm text-text-secondary">
+              This posts your comment and moves the application to manager
+              reviewed, ready for HR&apos;s final decision.
+            </p>
+            <Textarea
+              value={reviewComment}
+              onChange={(event) => setReviewComment(event.target.value)}
+              placeholder="Add your review comment…"
+              rows={4}
+              disabled={submittingReview}
+              autoFocus
+            />
+            {reviewError && <p className="text-sm text-danger">{reviewError}</p>}
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={submittingReview}
+                onClick={() => {
+                  setShowReviewDialog(false);
+                  setReviewError(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={submittingReview || !reviewComment.trim()}
+              >
+                {submittingReview ? "Submitting…" : "Submit & Mark Reviewed"}
+              </Button>
+            </div>
+          </form>
+        </Dialog>
+
         {canDecide && match?.applicationStatus === "IN_REVIEW" && (
           <Card className="mt-8">
             <h2 className="font-heading text-base font-semibold text-text-primary">
@@ -364,7 +501,7 @@ function CandidateDetail() {
           </Card>
         )}
 
-        {canDecide && (
+        {canDecide && match && match.applicationStatus === "MANAGER_REVIEWED" && (
           <section className="mt-8">
             <h2 className="font-heading text-base font-semibold text-text-primary">
               Decision
@@ -374,6 +511,7 @@ function CandidateDetail() {
                 <select
                   value={decision}
                   onChange={(event) => setDecision(event.target.value as Decision)}
+                  disabled={submittingDecision}
                   className="rounded-[var(--radius-control)] border border-border bg-white px-3 py-2 text-sm text-text-primary focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-100"
                 >
                   <option value="SELECTED">Selected</option>
@@ -389,6 +527,7 @@ function CandidateDetail() {
                         type="datetime-local"
                         value={nextRoundTime}
                         onChange={(event) => setNextRoundTime(event.target.value)}
+                        disabled={submittingDecision}
                         className="mt-1 w-full rounded-[var(--radius-control)] border border-border px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-100"
                       />
                     </label>
@@ -399,6 +538,7 @@ function CandidateDetail() {
                         type="datetime-local"
                         value={nextRoundDeadline}
                         onChange={(event) => setNextRoundDeadline(event.target.value)}
+                        disabled={submittingDecision}
                         className="mt-1 w-full rounded-[var(--radius-control)] border border-border px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-100"
                       />
                     </label>
@@ -408,10 +548,60 @@ function CandidateDetail() {
                 {decisionMessage && (
                   <p className="text-sm text-success-text">{decisionMessage}</p>
                 )}
-                <Button type="submit" className="self-start">
-                  Submit Decision
+                <Button type="submit" disabled={submittingDecision} className="self-start">
+                  {submittingDecision ? "Submitting…" : "Submit Decision"}
                 </Button>
               </form>
+            </Card>
+          </section>
+        )}
+        {canDecide && match && match.applicationStatus !== "MANAGER_REVIEWED" && decisionMessage && (
+          <section className="mt-8">
+            <h2 className="font-heading text-base font-semibold text-text-primary">
+              Decision
+            </h2>
+            <Card className="mt-2">
+              <p className="text-sm text-success-text">{decisionMessage}</p>
+            </Card>
+          </section>
+        )}
+
+        {canDecide && match && match.applicationStatus === "SELECTED" && (
+          <section className="mt-8">
+            <h2 className="font-heading text-base font-semibold text-text-primary">
+              Offer Letter
+            </h2>
+            <p className="mt-1 text-sm text-text-secondary">
+              This candidate has been selected. Sending the offer letter marks
+              them as hired.
+            </p>
+            <Card className="mt-2">
+              <form onSubmit={sendOfferLetter} className="flex flex-col gap-3">
+                <Textarea
+                  value={offerDetails}
+                  onChange={(event) => setOfferDetails(event.target.value)}
+                  placeholder="Optional details to include (start date, compensation, next steps)…"
+                  rows={3}
+                  disabled={sendingOffer}
+                />
+                {offerError && <p className="text-sm text-danger">{offerError}</p>}
+                {offerMessage && (
+                  <p className="text-sm text-success-text">{offerMessage}</p>
+                )}
+                <Button type="submit" disabled={sendingOffer} className="self-start">
+                  {sendingOffer ? "Sending…" : "Send Offer Letter"}
+                </Button>
+              </form>
+            </Card>
+          </section>
+        )}
+        {canDecide && match && match.applicationStatus === "HIRED" && offerMessage && (
+          <section className="mt-8">
+            <h2 className="font-heading text-base font-semibold text-text-primary">
+              Offer Letter
+            </h2>
+            <Card className="mt-2">
+              <p className="text-sm text-success-text">{offerMessage}</p>
             </Card>
           </section>
         )}

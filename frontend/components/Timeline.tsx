@@ -16,6 +16,11 @@ const STAGE_INDEX: Record<string, number> = {
   INTERVIEW_EXPIRED: 2,
   IN_REVIEW: 3,
   MANAGER_REVIEW: 4,
+  // Manager review is done and the process has moved into the Final
+  // Decision phase (awaiting HR) — same stage bucket as the terminal
+  // decisions below, but not itself in TERMINAL_STATUSES, so it renders as
+  // the current in-progress stage rather than a completed/rejected marker.
+  MANAGER_REVIEWED: 5,
   SELECTED: 5,
   NEXT_ROUND: 5,
   HIRED: 5,

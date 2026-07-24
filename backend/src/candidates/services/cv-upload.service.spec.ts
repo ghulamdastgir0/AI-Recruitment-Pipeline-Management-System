@@ -1,11 +1,14 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { AuditLogService } from '../../audit/audit-log.service';
-import { MatchingService } from '../../matching/matching.service';
+import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BackgroundJobQueueService } from '../../shared/background-jobs/background-job-queue.service';
 import { EmailService } from '../../shared/email/email.service';
 import { CandidateLinksService } from '../../shared/links/candidate-links.service';
-import { CvProcessorService } from './cv-processor.service';
+import {
+  CV_MATCH_ALL_PENDING_JOB_TYPE,
+  CV_PROCESSING_JOB_TYPE,
+} from './cv-processor.service';
 import { CvStorageService } from './cv-storage.service';
 import { CvUploadService } from './cv-upload.service';
 
@@ -29,17 +32,11 @@ function buildService() {
     save: jest.fn().mockResolvedValue({ filePath: '/storage/cvs/x.pdf' }),
   } as unknown as jest.Mocked<CvStorageService>;
   const jobQueue = {
-    enqueue: jest.fn(),
+    enqueue: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<BackgroundJobQueueService>;
-  const processor = {
-    process: jest.fn().mockResolvedValue(undefined),
-  } as unknown as jest.Mocked<CvProcessorService>;
   const audit = {
     record: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<AuditLogService>;
-  const matching = {
-    matchAllPendingApplications: jest.fn().mockResolvedValue(undefined),
-  } as unknown as jest.Mocked<MatchingService>;
   const email = {
     send: jest.fn().mockResolvedValue(true),
   } as unknown as jest.Mocked<EmailService>;
@@ -49,25 +46,21 @@ function buildService() {
   } as unknown as jest.Mocked<CandidateLinksService>;
 
   return {
-    service: new CvUploadService(
-      prisma,
-      storage,
-      jobQueue,
-      processor,
-      audit,
-      matching,
-      email,
-      links,
-    ),
+    service: new CvUploadService(prisma, storage, jobQueue, audit, email, links),
     prisma,
     storage,
     jobQueue,
-    processor,
     audit,
-    matching,
     email,
     links,
   };
+}
+
+function p2002Error(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+    code: 'P2002',
+    clientVersion: 'test',
+  });
 }
 
 describe('CvUploadService', () => {
@@ -301,7 +294,7 @@ describe('CvUploadService', () => {
     });
 
     it('reuses an existing profile by content hash regardless of source, without reprocessing', async () => {
-      const { service, prisma, storage, processor } = buildService();
+      const { service, prisma, storage, jobQueue } = buildService();
       (prisma.job.findUnique as jest.Mock).mockResolvedValue({
         id: 'job-1',
         status: 'PUBLISHED',
@@ -322,11 +315,14 @@ describe('CvUploadService', () => {
 
       expect(result.candidateProfileId).toBe('existing-cand');
       expect(storage.save).not.toHaveBeenCalled();
-      expect(processor.process).not.toHaveBeenCalled();
+      expect(jobQueue.enqueue).not.toHaveBeenCalledWith(
+        CV_PROCESSING_JOB_TYPE,
+        expect.anything(),
+      );
     });
 
     it('auto-triggers scoring for the new application when a content-hash-reused CV is already READY', async () => {
-      const { service, prisma, jobQueue, matching } = buildService();
+      const { service, prisma, jobQueue } = buildService();
       (prisma.job.findUnique as jest.Mock).mockResolvedValue({
         id: 'job-1',
         status: 'PUBLISHED',
@@ -346,15 +342,90 @@ describe('CvUploadService', () => {
       );
 
       expect(jobQueue.enqueue).toHaveBeenCalledTimes(1);
-      // Run whatever job was queued and confirm it's the matching trigger,
-      // scoped to the profile that was actually reused.
-      const calls = (jobQueue.enqueue as jest.Mock).mock.calls as Array<
-        [() => Promise<void>]
-      >;
-      await calls[0][0]();
-      expect(matching.matchAllPendingApplications).toHaveBeenCalledWith(
+      expect(jobQueue.enqueue).toHaveBeenCalledWith(
+        CV_MATCH_ALL_PENDING_JOB_TYPE,
         'existing-cand',
       );
+    });
+
+    it('queues cv-processing for a brand-new profile', async () => {
+      const { service, prisma, jobQueue } = buildService();
+      (prisma.job.findUnique as jest.Mock).mockResolvedValue({
+        id: 'job-1',
+        status: 'PUBLISHED',
+      });
+      (prisma.candidateProfile.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.candidateProfile.create as jest.Mock).mockResolvedValue({
+        id: 'cand-1',
+        cvStatus: 'PROCESSING',
+      });
+      (prisma.application.upsert as jest.Mock).mockResolvedValue({
+        id: 'app-1',
+      });
+
+      await service.uploadCv(
+        'job-1',
+        { buffer: PDF_BYTES, originalname: 'resume.pdf' },
+        'SELF_APPLIED',
+      );
+
+      expect(jobQueue.enqueue).toHaveBeenCalledWith(
+        CV_PROCESSING_JOB_TYPE,
+        'cand-1',
+      );
+    });
+
+    it('converts a (jobId, applicantEmail) unique-constraint race into the same ConflictException as the pre-check', async () => {
+      const { service, prisma } = buildService();
+      (prisma.job.findUnique as jest.Mock).mockResolvedValue({
+        id: 'job-1',
+        status: 'PUBLISHED',
+      });
+      // The pre-check race: findFirst sees nothing yet (a concurrent request
+      // for the same email hasn't committed its Application row when this
+      // one reads), so both proceed — the DB unique index is what actually
+      // catches the second writer.
+      (prisma.application.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.candidateProfile.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.candidateProfile.create as jest.Mock).mockResolvedValue({
+        id: 'cand-race',
+        cvStatus: 'PROCESSING',
+      });
+      (prisma.application.upsert as jest.Mock).mockRejectedValue(p2002Error());
+
+      await expect(
+        service.uploadCv(
+          'job-1',
+          { buffer: PDF_BYTES, originalname: 'resume.pdf' },
+          'SELF_APPLIED',
+          undefined,
+          { name: 'Jane Candidate', email: 'jane@example.com', phone: '555-0100' },
+        ),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('rethrows a non-P2002 error from the application upsert unchanged', async () => {
+      const { service, prisma } = buildService();
+      (prisma.job.findUnique as jest.Mock).mockResolvedValue({
+        id: 'job-1',
+        status: 'PUBLISHED',
+      });
+      (prisma.candidateProfile.findFirst as jest.Mock).mockResolvedValue(null);
+      (prisma.candidateProfile.create as jest.Mock).mockResolvedValue({
+        id: 'cand-1',
+        cvStatus: 'PROCESSING',
+      });
+      (prisma.application.upsert as jest.Mock).mockRejectedValue(
+        new Error('connection lost'),
+      );
+
+      await expect(
+        service.uploadCv(
+          'job-1',
+          { buffer: PDF_BYTES, originalname: 'resume.pdf' },
+          'SELF_APPLIED',
+        ),
+      ).rejects.toThrow('connection lost');
     });
 
     it('rejects a second application to the same job with the same email, with ConflictException', async () => {
@@ -382,6 +453,33 @@ describe('CvUploadService', () => {
       ).rejects.toBeInstanceOf(ConflictException);
       expect(prisma.candidateProfile.findFirst).not.toHaveBeenCalled();
       expect(prisma.application.upsert).not.toHaveBeenCalled();
+    });
+
+    it('includes the existing applicationId in the 409 payload so the apply form can link back to it', async () => {
+      const { service, prisma } = buildService();
+      (prisma.job.findUnique as jest.Mock).mockResolvedValue({
+        id: 'job-1',
+        status: 'PUBLISHED',
+      });
+      (prisma.application.findFirst as jest.Mock).mockResolvedValue({
+        id: 'existing-app',
+      });
+
+      try {
+        await service.uploadCv(
+          'job-1',
+          { buffer: PDF_BYTES, originalname: 'resume.pdf' },
+          'SELF_APPLIED',
+          undefined,
+          { name: 'Jane Candidate', email: 'jane@example.com', phone: '555-0100' },
+        );
+        throw new Error('expected uploadCv to reject');
+      } catch (err) {
+        expect(err).toBeInstanceOf(ConflictException);
+        expect((err as ConflictException).getResponse()).toEqual(
+          expect.objectContaining({ applicationId: 'existing-app' }),
+        );
+      }
     });
 
     it('sends an APPLICATION_RECEIVED confirmation email with a status link once the application is created', async () => {

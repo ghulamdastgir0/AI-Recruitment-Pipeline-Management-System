@@ -75,6 +75,10 @@ export interface TranscriptQuestionView {
 export interface InterviewTranscriptView {
   sessionStatus: string;
   overallScore: number | null;
+  /** Interview-level hire/no-hire-leaning call (STRONG_HIRE/HIRE/NO_HIRE/STRONG_NO_HIRE) — distinct from MatchResult's CV-match recommendation. */
+  recommendation: string | null;
+  /** Narrative summary of the whole session, not just per-skill scores. */
+  summary: string | null;
   startedAt: Date | null;
   completedAt: Date | null;
   questions: TranscriptQuestionView[];
@@ -97,6 +101,7 @@ const interviewSubmittedMessage =
 const postInterviewMessage = (applicationStatus: string): string => {
   switch (applicationStatus) {
     case 'MANAGER_REVIEW':
+    case 'MANAGER_REVIEWED':
       return 'Your interview is complete and your application is in final review.';
     case 'SELECTED':
     case 'HIRED':
@@ -105,6 +110,8 @@ const postInterviewMessage = (applicationStatus: string): string => {
       return "You've been invited to a further interview round. Please check your email for details.";
     case 'REJECTED':
       return "Thank you for the time and effort you invested throughout the interview process. After careful consideration, we've decided not to move forward with your application.";
+    case 'WITHDRAWN':
+      return 'You withdrew this application.';
     default:
       return interviewSubmittedMessage;
   }
@@ -170,6 +177,7 @@ export class InterviewSessionService {
   async answer(
     applicationId: string,
     file: UploadedAudio,
+    questionId?: string,
   ): Promise<InterviewTurnView | InterviewResultView> {
     const { application, session } = await this.loadContext(applicationId);
 
@@ -180,6 +188,13 @@ export class InterviewSessionService {
     }
 
     if (session.status !== 'IN_PROGRESS') {
+      // A stale retry (client-side timeout) whose original request already
+      // completed the interview lands here — the audio was recorded for a
+      // question that's now closed out, so hand back the terminal result
+      // instead of throwing on what looks like a genuine conflict.
+      if (session.status === 'COMPLETED' && questionId) {
+        return { status: 'COMPLETED', message: interviewSubmittedMessage };
+      }
       throw new ConflictException(
         `This interview session is ${session.status.toLowerCase()}, not awaiting an answer.`,
       );
@@ -188,6 +203,23 @@ export class InterviewSessionService {
     const pending = session.questions.find((q) => !q.answeredAt);
     if (!pending) {
       throw new ConflictException('No pending question to answer.');
+    }
+
+    // Tie this submission to the question it was actually recorded for — a
+    // client-side timeout retry resends the same (possibly stale) audio, and
+    // by the time it arrives the original (slow-but-not-failed) request may
+    // already have advanced the session to the next question. Without this
+    // check the retried audio would get silently attached to a *different*
+    // question and corrupt the transcript. See interview-session.service.ts
+    // audit finding #12.
+    if (questionId && questionId !== pending.id) {
+      const staleTarget = session.questions.find((q) => q.id === questionId);
+      if (staleTarget?.answeredAt) {
+        return this.toTurnView(pending);
+      }
+      throw new ConflictException(
+        'This question is no longer awaiting an answer — refresh and try again.',
+      );
     }
 
     const answerText = await this.audio.transcribe(
@@ -299,6 +331,14 @@ export class InterviewSessionService {
           terminal: true,
         };
       }
+      if (application.status === 'WITHDRAWN') {
+        return {
+          applicationStatus: application.status,
+          candidateStatus: toCandidateStatus(application.status),
+          message: 'You withdrew this application.',
+          terminal: true,
+        };
+      }
       return {
         applicationStatus: application.status,
         candidateStatus: toCandidateStatus(application.status),
@@ -380,6 +420,8 @@ export class InterviewSessionService {
     return {
       sessionStatus: session.status,
       overallScore: session.overallScore ? Number(session.overallScore) : null,
+      recommendation: session.recommendation,
+      summary: session.summary,
       startedAt: session.startedAt,
       completedAt: session.completedAt,
       questions: session.questions.map((q) => ({
@@ -460,6 +502,8 @@ export class InterviewSessionService {
         status: 'COMPLETED',
         completedAt: new Date(),
         overallScore: grade.overallScore,
+        recommendation: grade.recommendation,
+        summary: grade.summary,
       },
     });
 

@@ -1,5 +1,7 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { AuditLogService } from '../audit/audit-log.service';
+import { CandidateCommentsService } from '../candidate-comments/candidate-comments.service';
+import { JobPostingsService } from '../job-postings/job-postings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../shared/email/email.service';
 import { HiringDecisionsService } from './hiring-decisions.service';
@@ -18,18 +20,41 @@ function buildService() {
   const audit = {
     record: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<AuditLogService>;
+  const jobPostings = {
+    incrementHiredCountAndMaybeAutoClose: jest.fn().mockResolvedValue(undefined),
+  } as unknown as jest.Mocked<JobPostingsService>;
+  const comments = {
+    add: jest.fn().mockResolvedValue({
+      id: 'comment-1',
+      candidateId: 'cand-1',
+      jobPostingId: 'job-1',
+      authorUserId: 'hm-1',
+      content: 'Looks strong.',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }),
+  } as unknown as jest.Mocked<CandidateCommentsService>;
 
   return {
-    service: new HiringDecisionsService(prisma, email, audit),
+    service: new HiringDecisionsService(
+      prisma,
+      email,
+      audit,
+      jobPostings,
+      comments,
+    ),
     prisma,
     email,
     audit,
+    jobPostings,
+    comments,
   };
 }
 
-function mockApplication() {
+function mockApplication(overrides: { status?: string } = {}) {
   return {
     id: 'app-1',
+    status: overrides.status ?? 'MANAGER_REVIEWED',
     job: { title: 'Backend Engineer' },
     candidateProfile: {
       extractedDataJson: { name: 'Jane', email: 'jane@example.com' },
@@ -130,6 +155,19 @@ describe('HiringDecisionsService', () => {
     );
   });
 
+  it('throws ConflictException (and never re-sends an email) when the application already has a decision', async () => {
+    const { service, prisma, email } = buildService();
+    (prisma.application.findUnique as jest.Mock).mockResolvedValue(
+      mockApplication({ status: 'SELECTED' }),
+    );
+
+    await expect(
+      service.decide('cand-1', 'job-1', 'hr-1', { decision: 'REJECTED' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.application.update).not.toHaveBeenCalled();
+    expect(email.send).not.toHaveBeenCalled();
+  });
+
   it('does not write an EmailLog row when the email failed to send', async () => {
     const { service, prisma, email } = buildService();
     (prisma.application.findUnique as jest.Mock).mockResolvedValue(
@@ -143,6 +181,97 @@ describe('HiringDecisionsService', () => {
 
     expect(result.emailSent).toBe(false);
     expect(prisma.emailLog.create).not.toHaveBeenCalled();
+  });
+
+  describe('sendOfferLetter', () => {
+    it('throws NotFoundException when no application exists for the candidate/job pair', async () => {
+      const { service, prisma } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.sendOfferLetter('cand-1', 'job-1', 'hr-1'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('throws ConflictException when the application is not SELECTED', async () => {
+      const { service, prisma, jobPostings } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(
+        mockApplication({ status: 'MANAGER_REVIEW' }),
+      );
+
+      await expect(
+        service.sendOfferLetter('cand-1', 'job-1', 'hr-1'),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.application.update).not.toHaveBeenCalled();
+      expect(jobPostings.incrementHiredCountAndMaybeAutoClose).not.toHaveBeenCalled();
+    });
+
+    it('moves a SELECTED application to HIRED, sends OFFER_LETTER, and increments hiredCount', async () => {
+      const { service, prisma, email, jobPostings, audit } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(
+        mockApplication({ status: 'SELECTED' }),
+      );
+
+      const result = await service.sendOfferLetter(
+        'cand-1',
+        'job-1',
+        'hr-1',
+        'Start date: Sept 1.',
+      );
+
+      expect(result).toEqual({
+        applicationId: 'app-1',
+        status: 'HIRED',
+        emailSent: true,
+      });
+      expect(prisma.application.update).toHaveBeenCalledWith({
+        where: { id: 'app-1' },
+        data: { status: 'HIRED' },
+      });
+      expect(email.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          to: 'jane@example.com',
+          type: 'OFFER_LETTER',
+          variables: expect.objectContaining({
+            offerDetails: 'Start date: Sept 1.',
+          }),
+        }),
+      );
+      expect(prisma.emailLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            applicationId: 'app-1',
+            type: 'OFFER_LETTER',
+            triggeredByUserId: 'hr-1',
+          }),
+        }),
+      );
+      expect(
+        jobPostings.incrementHiredCountAndMaybeAutoClose,
+      ).toHaveBeenCalledWith('job-1', 'hr-1');
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'application_offer_letter.sent',
+          actorUserId: 'hr-1',
+        }),
+      );
+    });
+
+    it('does not write an EmailLog row when the offer email fails to send, but still increments hiredCount', async () => {
+      const { service, prisma, email, jobPostings } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(
+        mockApplication({ status: 'SELECTED' }),
+      );
+      (email.send as jest.Mock).mockResolvedValue(false);
+
+      const result = await service.sendOfferLetter('cand-1', 'job-1', 'hr-1');
+
+      expect(result.emailSent).toBe(false);
+      expect(prisma.emailLog.create).not.toHaveBeenCalled();
+      expect(
+        jobPostings.incrementHiredCountAndMaybeAutoClose,
+      ).toHaveBeenCalledWith('job-1', 'hr-1');
+    });
   });
 
   describe('moveToManagerReview', () => {
@@ -193,6 +322,71 @@ describe('HiringDecisionsService', () => {
         expect.objectContaining({
           actorUserId: 'hr-1',
           action: 'application.moved_to_manager_review',
+          resourceId: 'app-1',
+        }),
+      );
+    });
+  });
+
+  describe('markManagerReviewed', () => {
+    it('throws NotFoundException when no application exists for the candidate/job pair', async () => {
+      const { service, prisma } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.markManagerReviewed('cand-1', 'job-1', 'hm-1', 'Looks strong.'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('throws ConflictException when the application is not MANAGER_REVIEW', async () => {
+      const { service, prisma, comments } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        id: 'app-1',
+        status: 'IN_REVIEW',
+      });
+
+      await expect(
+        service.markManagerReviewed('cand-1', 'job-1', 'hm-1', 'Looks strong.'),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(comments.add).not.toHaveBeenCalled();
+      expect(prisma.application.update).not.toHaveBeenCalled();
+    });
+
+    it('posts the comment, moves a MANAGER_REVIEW application to MANAGER_REVIEWED, and audit-logs it', async () => {
+      const { service, prisma, comments, audit } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        id: 'app-1',
+        status: 'MANAGER_REVIEW',
+      });
+
+      const result = await service.markManagerReviewed(
+        'cand-1',
+        'job-1',
+        'hm-1',
+        'Looks strong.',
+      );
+
+      expect(comments.add).toHaveBeenCalledWith(
+        'cand-1',
+        'job-1',
+        'hm-1',
+        'Looks strong.',
+      );
+      expect(prisma.application.update).toHaveBeenCalledWith({
+        where: { id: 'app-1' },
+        data: { status: 'MANAGER_REVIEWED' },
+      });
+      expect(result).toEqual(
+        expect.objectContaining({
+          applicationId: 'app-1',
+          status: 'MANAGER_REVIEWED',
+          comment: expect.objectContaining({ id: 'comment-1' }),
+        }),
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorUserId: 'hm-1',
+          action: 'application.marked_manager_reviewed',
           resourceId: 'app-1',
         }),
       );

@@ -4,6 +4,7 @@ import { AudioModule } from '../shared/audio/audio.module';
 import { InterviewGateway } from './interview.gateway';
 import { InterviewSessionsController } from './interview-sessions.controller';
 import { InterviewTranscriptController } from './interview-transcript.controller';
+import { InterviewExpiryService } from './services/interview-expiry.service';
 import { InterviewOrchestratorService } from './services/interview-orchestrator.service';
 import { InterviewReminderService } from './services/interview-reminder.service';
 import { InterviewSessionService } from './services/interview-session.service';
@@ -21,6 +22,7 @@ import { InterviewSessionService } from './services/interview-session.service';
     InterviewOrchestratorService,
     InterviewGateway,
     InterviewReminderService,
+    InterviewExpiryService,
   ],
   exports: [InterviewSessionService],
 })

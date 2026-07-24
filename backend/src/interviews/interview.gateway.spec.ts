@@ -62,10 +62,14 @@ describe('InterviewGateway', () => {
         client,
       );
 
-      expect(sessions.answer).toHaveBeenCalledWith('app-1', {
-        buffer: Buffer.from(audio),
-        originalname: 'answer.webm',
-      });
+      expect(sessions.answer).toHaveBeenCalledWith(
+        'app-1',
+        {
+          buffer: Buffer.from(audio),
+          originalname: 'answer.webm',
+        },
+        undefined,
+      );
       expect(client.emit).toHaveBeenCalledWith('question', nextQuestion);
     });
 
@@ -105,6 +109,76 @@ describe('InterviewGateway', () => {
       expect(client.emit).toHaveBeenCalledWith('error', {
         message: 'groq down',
       });
+    });
+  });
+
+  describe('rate limiting', () => {
+    it('stops calling start() once the per-application join limit is hit', async () => {
+      const { gateway, sessions, client } = buildGateway();
+      sessions.start.mockResolvedValue({
+        questionId: 'q-1',
+        sequenceOrder: 1,
+        questionText: 'Q1',
+        questionAudioUrl: '/interview-sessions/questions/q-1/audio',
+      });
+
+      for (let i = 0; i < 10; i++) {
+        await gateway.handleJoin({ applicationId: 'app-1' }, client);
+      }
+      expect(sessions.start).toHaveBeenCalledTimes(10);
+
+      await gateway.handleJoin({ applicationId: 'app-1' }, client);
+
+      expect(sessions.start).toHaveBeenCalledTimes(10);
+      expect(client.emit).toHaveBeenLastCalledWith(
+        'error',
+        expect.objectContaining({ message: expect.stringMatching(/too many/i) }),
+      );
+    });
+
+    it('stops calling answer() once the per-application answer limit is hit', async () => {
+      const { gateway, sessions, client } = buildGateway();
+      sessions.answer.mockResolvedValue({
+        questionId: 'q-2',
+        sequenceOrder: 2,
+        questionText: 'Q2',
+        questionAudioUrl: '/interview-sessions/questions/q-2/audio',
+      });
+      const payload = {
+        applicationId: 'app-2',
+        audio: new ArrayBuffer(0),
+        filename: 'answer.webm',
+      };
+
+      for (let i = 0; i < 30; i++) {
+        await gateway.handleAnswer(payload, client);
+      }
+      expect(sessions.answer).toHaveBeenCalledTimes(30);
+
+      await gateway.handleAnswer(payload, client);
+
+      expect(sessions.answer).toHaveBeenCalledTimes(30);
+      expect(client.emit).toHaveBeenLastCalledWith(
+        'error',
+        expect.objectContaining({ message: expect.stringMatching(/too many/i) }),
+      );
+    });
+
+    it('rate-limits each applicationId independently', async () => {
+      const { gateway, sessions, client } = buildGateway();
+      sessions.start.mockResolvedValue({
+        questionId: 'q-1',
+        sequenceOrder: 1,
+        questionText: 'Q1',
+        questionAudioUrl: '/interview-sessions/questions/q-1/audio',
+      });
+
+      for (let i = 0; i < 10; i++) {
+        await gateway.handleJoin({ applicationId: 'app-1' }, client);
+      }
+      await gateway.handleJoin({ applicationId: 'app-other' }, client);
+
+      expect(sessions.start).toHaveBeenCalledTimes(11);
     });
   });
 });

@@ -1,5 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { AuditLogService } from '../audit/audit-log.service';
+import { JobPostingsService } from '../job-postings/job-postings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmClientService } from '../shared/llm/llm-client.service';
 import { AssistantOrchestratorService } from './assistant-orchestrator.service';
@@ -24,14 +25,22 @@ function buildOrchestrator() {
   const audit = {
     record: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<AuditLogService>;
+  const jobPostings = {
+    getById: jest.fn().mockResolvedValue({
+      id: 'job-1',
+      title: 'Backend Engineer',
+      status: 'DRAFT',
+    }),
+  } as unknown as jest.Mocked<JobPostingsService>;
 
   const orchestrator = new AssistantOrchestratorService(
     llm,
     toolRegistry,
     prisma,
     audit,
+    jobPostings,
   );
-  return { orchestrator, llm, toolRegistry, prisma, audit };
+  return { orchestrator, llm, toolRegistry, prisma, audit, jobPostings };
 }
 
 describe('AssistantOrchestratorService', () => {
@@ -273,6 +282,95 @@ describe('AssistantOrchestratorService', () => {
       );
       expect(audit.record).toHaveBeenCalled();
       expect(result.reply).toContain('Done');
+    });
+
+    it('resolves the job posting title/status server-side into the confirmation reply, not just the raw id', async () => {
+      const { orchestrator, prisma, toolRegistry, jobPostings } =
+        buildOrchestrator();
+      (prisma.pendingAssistantAction.findUnique as jest.Mock).mockResolvedValue(
+        {
+          id: 'action-1',
+          tool: 'publishJobPosting',
+          argsJson: { jobPostingId: 'job-1' },
+          status: 'PENDING',
+          expiresAt: new Date(Date.now() + 1_800_000),
+        },
+      );
+      toolRegistry.execute.mockResolvedValue({
+        ok: true,
+        result: { id: 'job-1', status: 'PUBLISHED' },
+      });
+
+      const result = await orchestrator.confirmAction('action-1', 'user-2');
+
+      expect(jobPostings.getById).toHaveBeenCalledWith('job-1');
+      expect(result.reply).toContain('Backend Engineer');
+    });
+
+    it('resolves the job posting title into the pendingAction preview shown before HR confirms', async () => {
+      const { orchestrator, llm, toolRegistry, prisma, jobPostings } =
+        buildOrchestrator();
+      toolRegistry.isGated.mockReturnValue(true);
+      llm.chat.mockResolvedValue({
+        message: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call-1',
+              type: 'function',
+              function: {
+                name: 'publishJobPosting',
+                arguments: '{"jobPostingId":"job-1"}',
+              },
+            },
+          ],
+        },
+        finishReason: 'tool_calls',
+      });
+      (prisma.pendingAssistantAction.create as jest.Mock).mockResolvedValue({
+        id: 'action-1',
+        expiresAt: new Date(Date.now() + 1_800_000),
+      });
+
+      const result = await orchestrator.handleMessage(
+        [],
+        'publish the backend engineer posting',
+        'user-1',
+      );
+
+      expect(jobPostings.getById).toHaveBeenCalledWith('job-1');
+      expect(result.reply).toContain('Backend Engineer');
+    });
+
+    it('marks the action FAILED (not CONFIRMED) when the underlying tool call fails', async () => {
+      const { orchestrator, prisma, toolRegistry, audit } = buildOrchestrator();
+      (prisma.pendingAssistantAction.findUnique as jest.Mock).mockResolvedValue(
+        {
+          id: 'action-1',
+          tool: 'publishJobPosting',
+          argsJson: { jobPostingId: 'job-1' },
+          status: 'PENDING',
+          expiresAt: new Date(Date.now() + 1_800_000),
+        },
+      );
+      toolRegistry.execute.mockResolvedValue({
+        ok: false,
+        result: { error: 'Assign at least one Hiring Manager before publishing this job posting.' },
+      });
+
+      const result = await orchestrator.confirmAction('action-1', 'user-2');
+
+      expect(prisma.pendingAssistantAction.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'action-1' },
+          data: expect.objectContaining({ status: 'FAILED' }),
+        }),
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ details: expect.objectContaining({ ok: false }) }),
+      );
+      expect(result.reply).toContain('That failed');
     });
 
     it('throws NotFoundException for an unknown action id', async () => {

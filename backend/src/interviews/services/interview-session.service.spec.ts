@@ -306,6 +306,8 @@ describe('InterviewSessionService', () => {
             justification: 'Great answer.',
           },
         ],
+        recommendation: 'HIRE',
+        summary: 'Strong overall performance.',
       });
       (prisma.skill.upsert as jest.Mock).mockResolvedValue({
         id: 'skill-5',
@@ -345,6 +347,144 @@ describe('InterviewSessionService', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('answer — stale retry / questionId misattribution guard', () => {
+    function mockInProgressSession() {
+      return {
+        id: 'app-1',
+        candidateProfile: { extractedDataJson: { skills: [] } },
+        job: { title: 'Backend Engineer', jobSkills: [] },
+        interviewSession: {
+          id: 'session-1',
+          status: 'IN_PROGRESS',
+          windowExpiresAt: inTheFuture,
+          questions: [
+            {
+              id: 'q-1',
+              sequenceOrder: 1,
+              questionText: 'Q1',
+              answerText: 'already answered',
+              answeredAt: new Date(),
+              isFollowUp: false,
+              expectedCore: 'core1',
+              targetSkill: { name: 'Skill1' },
+            },
+            {
+              id: 'q-2',
+              sequenceOrder: 2,
+              questionText: 'Q2',
+              answerText: null,
+              answeredAt: null,
+              isFollowUp: false,
+              expectedCore: 'core2',
+              targetSkill: { name: 'Skill2' },
+            },
+          ],
+        },
+      };
+    }
+
+    it('returns the current pending question instead of transcribing a stale retry against an already-answered question', async () => {
+      const { service, prisma, audio } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(
+        mockInProgressSession(),
+      );
+
+      const result = await service.answer(
+        'app-1',
+        { buffer: Buffer.from('stale audio'), originalname: 'answer.wav' },
+        'q-1',
+      );
+
+      expect(result).toEqual({
+        questionId: 'q-2',
+        sequenceOrder: 2,
+        questionText: 'Q2',
+        questionAudioUrl: '/interview-sessions/questions/q-2/audio',
+      });
+      expect(audio.transcribe).not.toHaveBeenCalled();
+      expect(prisma.aIInterviewQuestion.update).not.toHaveBeenCalled();
+    });
+
+    it('throws ConflictException when questionId matches no question in the session', async () => {
+      const { service, prisma, audio } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(
+        mockInProgressSession(),
+      );
+
+      await expect(
+        service.answer(
+          'app-1',
+          { buffer: Buffer.from('audio'), originalname: 'answer.wav' },
+          'q-unknown',
+        ),
+      ).rejects.toThrow(
+        'This question is no longer awaiting an answer — refresh and try again.',
+      );
+      expect(audio.transcribe).not.toHaveBeenCalled();
+    });
+
+    it('proceeds normally when questionId matches the current pending question', async () => {
+      const { service, prisma, orchestrator, audio } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(
+        mockInProgressSession(),
+      );
+      orchestrator.nextTurn.mockResolvedValue({
+        complete: false,
+        questionText: 'Q3',
+        expectedCore: 'core3',
+        targetSkillName: 'Skill3',
+        isFollowUp: false,
+      });
+      (prisma.skill.upsert as jest.Mock).mockResolvedValue({
+        id: 'skill-3',
+        name: 'Skill3',
+      });
+      (prisma.aIInterviewQuestion.create as jest.Mock).mockResolvedValue({
+        id: 'q-3',
+        sequenceOrder: 3,
+        questionText: 'Q3',
+      });
+
+      await service.answer(
+        'app-1',
+        { buffer: Buffer.from('audio'), originalname: 'answer.wav' },
+        'q-2',
+      );
+
+      expect(audio.transcribe).toHaveBeenCalled();
+      expect(prisma.aIInterviewQuestion.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'q-2' } }),
+      );
+    });
+
+    it('returns a COMPLETED result for a stale retry that arrives after the interview already finished', async () => {
+      const { service, prisma, audio } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        id: 'app-1',
+        candidateProfile: { extractedDataJson: { skills: [] } },
+        job: { title: 'Backend Engineer', jobSkills: [] },
+        interviewSession: {
+          id: 'session-1',
+          status: 'COMPLETED',
+          windowExpiresAt: inTheFuture,
+          questions: [],
+        },
+      });
+
+      const result = await service.answer(
+        'app-1',
+        { buffer: Buffer.from('stale audio'), originalname: 'answer.wav' },
+        'q-1',
+      );
+
+      expect(result).toEqual({
+        status: 'COMPLETED',
+        message: expect.any(String),
+      });
+      expect(audio.transcribe).not.toHaveBeenCalled();
     });
   });
 
@@ -432,6 +572,12 @@ describe('InterviewSessionService', () => {
     it('does not freeze on the interview-completed message once the application moves to MANAGER_REVIEW', async () => {
       const status = await withCompletedSession('MANAGER_REVIEW');
       expect(status.message).not.toMatch(/under review$/);
+      expect(status.message).toMatch(/final review/i);
+      expect(status.candidateStatus).toBe('FINAL_REVIEW');
+    });
+
+    it('keeps the same final-review message once the Hiring Manager marks their review done (MANAGER_REVIEWED)', async () => {
+      const status = await withCompletedSession('MANAGER_REVIEWED');
       expect(status.message).toMatch(/final review/i);
       expect(status.candidateStatus).toBe('FINAL_REVIEW');
     });

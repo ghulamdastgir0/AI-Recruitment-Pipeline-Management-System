@@ -20,6 +20,22 @@ export class JobPostingIdArgsDto {
   jobPostingId!: string;
 }
 
+export class FindJobPostingArgsDto {
+  @IsString()
+  @IsNotEmpty()
+  query!: string;
+}
+
+export class AssignHiringManagerArgsDto {
+  @IsString()
+  @IsNotEmpty()
+  jobPostingId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  hiringManagerEmail!: string;
+}
+
 export class UpdateJobPostingArgsDto {
   @IsString()
   @IsNotEmpty()

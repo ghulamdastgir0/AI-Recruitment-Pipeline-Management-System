@@ -66,6 +66,15 @@ export function patchJson<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
+/**
+ * Authenticated multipart upload. No Content-Type header is set — the
+ * browser derives the multipart boundary from the FormData itself, and
+ * setting one manually would strip that boundary and break parsing.
+ */
+export function postForm<T>(path: string, form: FormData): Promise<T> {
+  return apiFetch<T>(path, { method: "POST", body: form });
+}
+
 export function deleteRequest<T>(path: string): Promise<T> {
   return apiFetch<T>(path, { method: "DELETE" });
 }

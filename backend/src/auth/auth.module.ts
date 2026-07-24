@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JobAssignmentGuard } from './guards/job-assignment.guard';
@@ -10,6 +11,10 @@ import { RolesGuard } from './guards/roles.guard';
 @Global()
 @Module({
   imports: [
+    // Local (not global) throttler config for /auth/login — same pattern as
+    // CandidatesModule/InterviewsModule. Previously the single most
+    // brute-forceable public endpoint in the codebase had no throttle at all.
+    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 20 }]),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

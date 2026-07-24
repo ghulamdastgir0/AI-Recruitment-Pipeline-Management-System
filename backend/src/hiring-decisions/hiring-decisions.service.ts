@@ -5,7 +5,12 @@ import {
 } from '@nestjs/common';
 import { AuditLogService } from '../audit/audit-log.service';
 import { resolveCandidateIdentity } from '../candidates/candidate-identity.util';
+import {
+  CandidateCommentsService,
+  CandidateCommentView,
+} from '../candidate-comments/candidate-comments.service';
 import { AppStatus, EmailType } from '../generated/prisma/enums';
+import { JobPostingsService } from '../job-postings/job-postings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../shared/email/email.service';
 
@@ -19,6 +24,12 @@ export interface DecideApplicationResult {
   applicationId: string;
   status: AppStatus;
   emailSent: boolean;
+}
+
+export interface MarkManagerReviewedResult {
+  applicationId: string;
+  status: AppStatus;
+  comment: CandidateCommentView;
 }
 
 const STATUS_BY_DECISION: Record<
@@ -45,6 +56,8 @@ export class HiringDecisionsService {
     private readonly prisma: PrismaService,
     private readonly email: EmailService,
     private readonly audit: AuditLogService,
+    private readonly jobPostings: JobPostingsService,
+    private readonly comments: CandidateCommentsService,
   ) {}
 
   async decide(
@@ -65,6 +78,11 @@ export class HiringDecisionsService {
     if (!application) {
       throw new NotFoundException(
         `No application found for candidate "${candidateId}" and job posting "${jobPostingId}".`,
+      );
+    }
+    if (application.status !== 'MANAGER_REVIEWED') {
+      throw new ConflictException(
+        `This application is ${application.status.toLowerCase()}, not awaiting a decision — the assigned Hiring Manager may not have completed their review yet, or a decision may already have been recorded.`,
       );
     }
 
@@ -113,6 +131,83 @@ export class HiringDecisionsService {
   }
 
   /**
+   * The fourth HR one-click email action — previously unbuilt entirely (no
+   * EmailType, template, or action existed for an offer letter). Only valid
+   * on a SELECTED application; moves it to the terminal HIRED status (the
+   * only place that status is ever assigned) and increments the job's
+   * hiredCount, which may in turn auto-close the posting once its hiring
+   * target is met (see JobPostingsService.incrementHiredCountAndMaybeAutoClose).
+   */
+  async sendOfferLetter(
+    candidateId: string,
+    jobPostingId: string,
+    actorUserId: string,
+    offerDetails?: string,
+  ): Promise<DecideApplicationResult> {
+    const application = await this.prisma.application.findUnique({
+      where: {
+        candidateProfileId_jobId: {
+          candidateProfileId: candidateId,
+          jobId: jobPostingId,
+        },
+      },
+      include: { job: true, candidateProfile: true },
+    });
+    if (!application) {
+      throw new NotFoundException(
+        `No application found for candidate "${candidateId}" and job posting "${jobPostingId}".`,
+      );
+    }
+    if (application.status !== 'SELECTED') {
+      throw new ConflictException(
+        `This application is ${application.status.toLowerCase()}, not selected — an offer letter can only be sent once a candidate has been selected.`,
+      );
+    }
+
+    await this.prisma.application.update({
+      where: { id: application.id },
+      data: { status: 'HIRED' },
+    });
+
+    const { name: candidateName, email: candidateEmail } =
+      resolveCandidateIdentity(application.candidateProfile);
+
+    const emailSent = await this.email.send({
+      to: candidateEmail,
+      type: 'OFFER_LETTER',
+      variables: {
+        candidateName,
+        jobTitle: application.job.title,
+        offerDetails,
+      },
+    });
+    if (emailSent) {
+      await this.prisma.emailLog.create({
+        data: {
+          applicationId: application.id,
+          type: 'OFFER_LETTER',
+          triggeredByUserId: actorUserId,
+        },
+      });
+    }
+
+    await this.jobPostings.incrementHiredCountAndMaybeAutoClose(
+      jobPostingId,
+      actorUserId,
+    );
+
+    await this.audit.record({
+      actorUserId,
+      action: 'application_offer_letter.sent',
+      resourceType: 'Application',
+      resourceId: application.id,
+      details: { emailSent },
+    });
+
+    return { applicationId: application.id, status: 'HIRED', emailSent };
+  }
+
+  /**
    * HR-explicit stage transition after the AI interview completes
    * (Application.status is set to IN_REVIEW automatically at that point) —
    * signals the candidate is ready for the assigned Hiring Manager's
@@ -157,5 +252,64 @@ export class HiringDecisionsService {
     });
 
     return { applicationId: application.id, status: 'MANAGER_REVIEW' };
+  }
+
+  /**
+   * The assigned Hiring Manager's counterpart to moveToManagerReview() —
+   * closes out the manager-review stage with their required comment and
+   * advances the application to MANAGER_REVIEWED so HR's decide() (gated on
+   * that exact status) always has manager feedback attached before a final
+   * call. JobAssignmentGuard on the controller already confirms the caller
+   * is assigned to this job posting; not re-checked here.
+   */
+  async markManagerReviewed(
+    candidateId: string,
+    jobPostingId: string,
+    actorUserId: string,
+    comment: string,
+  ): Promise<MarkManagerReviewedResult> {
+    const application = await this.prisma.application.findUnique({
+      where: {
+        candidateProfileId_jobId: {
+          candidateProfileId: candidateId,
+          jobId: jobPostingId,
+        },
+      },
+    });
+    if (!application) {
+      throw new NotFoundException(
+        `No application found for candidate "${candidateId}" and job posting "${jobPostingId}".`,
+      );
+    }
+    if (application.status !== 'MANAGER_REVIEW') {
+      throw new ConflictException(
+        `This application is ${application.status.toLowerCase()}, not awaiting manager review.`,
+      );
+    }
+
+    const createdComment = await this.comments.add(
+      candidateId,
+      jobPostingId,
+      actorUserId,
+      comment,
+    );
+
+    await this.prisma.application.update({
+      where: { id: application.id },
+      data: { status: 'MANAGER_REVIEWED' },
+    });
+
+    await this.audit.record({
+      actorUserId,
+      action: 'application.marked_manager_reviewed',
+      resourceType: 'Application',
+      resourceId: application.id,
+    });
+
+    return {
+      applicationId: application.id,
+      status: 'MANAGER_REVIEWED',
+      comment: createdComment,
+    };
   }
 }

@@ -15,6 +15,39 @@ interface AnswerPayload {
   applicationId: string;
   audio: ArrayBuffer;
   filename: string;
+  /** The question this recording was made for — lets the service detect/ignore a stale timeout-retry. */
+  questionId?: string;
+}
+
+// Mirrors the REST twin's @Throttle windows (interview-sessions.controller.ts)
+// — ThrottlerGuard only guards HTTP routes, so the WS transport the frontend
+// actually uses needs its own equivalent. Each event triggers real, billed
+// Groq STT/LLM/TTS calls, so this is the only thing standing between a
+// hammering client (or a retry loop) and unbounded API spend.
+const JOIN_LIMIT = { max: 10, windowMs: 600_000 };
+const ANSWER_LIMIT = { max: 30, windowMs: 600_000 };
+
+class SlidingWindowLimiter {
+  private readonly hits = new Map<string, number[]>();
+
+  constructor(
+    private readonly max: number,
+    private readonly windowMs: number,
+  ) {}
+
+  /** True if this key is still within its rate limit (and records the hit). */
+  consume(key: string): boolean {
+    const now = Date.now();
+    const cutoff = now - this.windowMs;
+    const existing = (this.hits.get(key) ?? []).filter((t) => t > cutoff);
+    if (existing.length >= this.max) {
+      this.hits.set(key, existing);
+      return false;
+    }
+    existing.push(now);
+    this.hits.set(key, existing);
+    return true;
+  }
 }
 
 /**
@@ -36,6 +69,15 @@ interface AnswerPayload {
   maxHttpBufferSize: 10 * 1024 * 1024,
 })
 export class InterviewGateway {
+  private readonly joinLimiter = new SlidingWindowLimiter(
+    JOIN_LIMIT.max,
+    JOIN_LIMIT.windowMs,
+  );
+  private readonly answerLimiter = new SlidingWindowLimiter(
+    ANSWER_LIMIT.max,
+    ANSWER_LIMIT.windowMs,
+  );
+
   constructor(private readonly sessions: InterviewSessionService) {}
 
   @SubscribeMessage('join')
@@ -43,6 +85,12 @@ export class InterviewGateway {
     @MessageBody() body: JoinPayload,
     @ConnectedSocket() client: Socket,
   ): Promise<void> {
+    if (!this.joinLimiter.consume(body.applicationId)) {
+      client.emit('error', {
+        message: 'Too many attempts — please wait a few minutes and try again.',
+      });
+      return;
+    }
     try {
       const turn = await this.sessions.start(body.applicationId);
       client.emit('question', turn);
@@ -56,11 +104,21 @@ export class InterviewGateway {
     @MessageBody() body: AnswerPayload,
     @ConnectedSocket() client: Socket,
   ): Promise<void> {
-    try {
-      const result = await this.sessions.answer(body.applicationId, {
-        buffer: Buffer.from(body.audio),
-        originalname: body.filename,
+    if (!this.answerLimiter.consume(body.applicationId)) {
+      client.emit('error', {
+        message: 'Too many attempts — please wait a few minutes and try again.',
       });
+      return;
+    }
+    try {
+      const result = await this.sessions.answer(
+        body.applicationId,
+        {
+          buffer: Buffer.from(body.audio),
+          originalname: body.filename,
+        },
+        body.questionId,
+      );
       if ('status' in result) {
         client.emit('completed', result);
       } else {

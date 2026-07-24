@@ -9,11 +9,12 @@ describe('toCandidateStatus', () => {
     ['INTERVIEW_EXPIRED', 'REJECTED'],
     ['IN_REVIEW', 'INTERVIEW_COMPLETED'],
     ['MANAGER_REVIEW', 'FINAL_REVIEW'],
+    ['MANAGER_REVIEWED', 'FINAL_REVIEW'],
     ['NEXT_ROUND', 'INTERVIEW_PENDING'],
     ['SELECTED', 'ACCEPTED'],
     ['HIRED', 'ACCEPTED'],
     ['REJECTED', 'REJECTED'],
-    ['WITHDRAWN', 'REJECTED'],
+    ['WITHDRAWN', 'WITHDRAWN'],
   ] as const)('maps %s -> %s', (internal, expected) => {
     expect(toCandidateStatus(internal)).toBe(expected);
   });

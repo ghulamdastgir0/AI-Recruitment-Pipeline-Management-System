@@ -26,7 +26,9 @@ export default function InterviewPage() {
   const router = useRouter();
   const socketRef = useRef<Socket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const pendingAnswerRef = useRef<Blob | null>(null);
+  const pendingAnswerRef = useRef<{ blob: Blob; questionId: string } | null>(
+    null,
+  );
   const answerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [started, setStarted] = useState(false);
@@ -47,8 +49,13 @@ export default function InterviewPage() {
     }
   }
 
-  function sendAnswer(blob: Blob) {
-    pendingAnswerRef.current = blob;
+  // Tags every submission with the question it was actually recorded for.
+  // A stalled request's "Retry" resends the exact same (blob, questionId)
+  // pair — if the original slow-but-not-failed request already went through
+  // by the time this fires, the backend detects the mismatch against its
+  // now-current pending question instead of silently attaching this stale
+  // audio to the wrong one.
+  function emitAnswer(blob: Blob, questionId: string) {
     setListening(false);
     setSubmitting(true);
     setStalled(false);
@@ -58,6 +65,7 @@ export default function InterviewPage() {
         applicationId,
         audio,
         filename: "answer.webm",
+        questionId,
       });
     });
     clearAnswerTimeout();
@@ -66,9 +74,18 @@ export default function InterviewPage() {
     }, ANSWER_TIMEOUT_MS);
   }
 
+  function sendAnswer(blob: Blob) {
+    if (!question) return;
+    pendingAnswerRef.current = { blob, questionId: question.questionId };
+    emitAnswer(blob, question.questionId);
+  }
+
   function retrySend() {
     if (pendingAnswerRef.current) {
-      sendAnswer(pendingAnswerRef.current);
+      emitAnswer(
+        pendingAnswerRef.current.blob,
+        pendingAnswerRef.current.questionId,
+      );
     }
   }
 

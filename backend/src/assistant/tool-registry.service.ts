@@ -9,12 +9,16 @@ import {
 import { DocumentRetrievalService } from '../documents/services/document-retrieval.service';
 import { CreateJobPostingDto } from '../job-postings/dto/create-job-posting.dto';
 import { UpdateJobPostingDto } from '../job-postings/dto/update-job-posting.dto';
+import { JobPostingAssignmentsService } from '../job-postings/job-posting-assignments.service';
 import { JobPostingsService } from '../job-postings/job-postings.service';
 import { MatchingService } from '../matching/matching.service';
 import { RankFilters, RankingService } from '../matching/ranking.service';
+import { UsersService } from '../users/users.service';
 import {
+  AssignHiringManagerArgsDto,
   CandidateIdArgsDto,
   CandidateJobArgsDto,
+  FindJobPostingArgsDto,
   JobPostingIdArgsDto,
   RankCandidatesArgsDto,
   SearchPoliciesArgsDto,
@@ -38,9 +42,11 @@ export class ToolRegistryService {
   constructor(
     private readonly documentRetrieval: DocumentRetrievalService,
     private readonly jobPostings: JobPostingsService,
+    private readonly jobAssignments: JobPostingAssignmentsService,
     private readonly cvUpload: CvUploadService,
     private readonly matching: MatchingService,
     private readonly ranking: RankingService,
+    private readonly users: UsersService,
     private readonly audit: AuditLogService,
   ) {}
 
@@ -120,6 +126,46 @@ export class ToolRegistryService {
       case 'publishJobPosting': {
         const dto = await parseAndValidate(JobPostingIdArgsDto, args);
         return this.jobPostings.publish(dto.jobPostingId, ctx.actorUserId);
+      }
+
+      case 'pauseJobPosting': {
+        const dto = await parseAndValidate(JobPostingIdArgsDto, args);
+        return this.jobPostings.pause(dto.jobPostingId, ctx.actorUserId);
+      }
+
+      case 'resumeJobPosting': {
+        const dto = await parseAndValidate(JobPostingIdArgsDto, args);
+        return this.jobPostings.resume(dto.jobPostingId, ctx.actorUserId);
+      }
+
+      case 'deleteJobPosting': {
+        const dto = await parseAndValidate(JobPostingIdArgsDto, args);
+        await this.jobPostings.delete(dto.jobPostingId, ctx.actorUserId);
+        return { deleted: true, jobPostingId: dto.jobPostingId };
+      }
+
+      case 'findJobPosting': {
+        const dto = await parseAndValidate(FindJobPostingArgsDto, args);
+        const results = await this.jobPostings.search(dto.query);
+        return {
+          results: results.map((j) => ({
+            jobPostingId: j.id,
+            title: j.title,
+            status: j.status,
+          })),
+        };
+      }
+
+      case 'assignHiringManager': {
+        const dto = await parseAndValidate(AssignHiringManagerArgsDto, args);
+        const hiringManager = await this.users.findHiringManagerByEmail(
+          dto.hiringManagerEmail,
+        );
+        return this.jobAssignments.assign(
+          dto.jobPostingId,
+          hiringManager.id,
+          ctx.actorUserId,
+        );
       }
 
       case 'uploadCandidateCv': {

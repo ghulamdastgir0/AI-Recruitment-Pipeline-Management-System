@@ -25,6 +25,7 @@ export function StaffNav() {
   if (!user) return null;
 
   const canUseAssistant = user.role === "SUPER_ADMIN" || user.role === "HR_ADMIN";
+  const isSuperAdmin = user.role === "SUPER_ADMIN";
   const initials = `${user.firstName?.[0] ?? ""}${user.lastName?.[0] ?? ""}`.toUpperCase();
 
   return (
@@ -46,6 +47,19 @@ export function StaffNav() {
             <NavLink href="/staff/assistant" active={pathname === "/staff/assistant"}>
               Assistant
             </NavLink>
+          )}
+          {isSuperAdmin && (
+            <>
+              <NavLink href="/staff/admin/users" active={pathname === "/staff/admin/users"}>
+                Users
+              </NavLink>
+              <NavLink
+                href="/staff/admin/documents"
+                active={pathname === "/staff/admin/documents"}
+              >
+                Documents
+              </NavLink>
+            </>
           )}
         </div>
       </div>

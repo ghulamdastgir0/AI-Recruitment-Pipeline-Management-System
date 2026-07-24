@@ -12,12 +12,26 @@ import { apiFetch, ApiError } from "@/lib/api";
 const BASE_POLL_MS = 3000;
 const MAX_POLL_MS = 30000;
 
+// Statuses the application can no longer move on from. Deliberately does
+// NOT include "an interview result exists" — the backend keeps moving the
+// application through manager review to a final decision after the
+// interview itself completes, and stopping polling as soon as `result` is
+// present would leave a selected/rejected/next-round candidate stuck on a
+// stale "in progress" message until they manually reload.
+const TERMINAL_APPLICATION_STATUSES = new Set([
+  "SCREENING_REJECTED",
+  "INTERVIEW_EXPIRED",
+  "SELECTED",
+  "REJECTED",
+  "NEXT_ROUND",
+  "HIRED",
+  "WITHDRAWN",
+]);
+
 function isTerminal(status: StatusView): boolean {
   return (
     status.terminal === true ||
-    status.applicationStatus === "SCREENING_REJECTED" ||
-    status.applicationStatus === "INTERVIEW_EXPIRED" ||
-    Boolean(status.result)
+    TERMINAL_APPLICATION_STATUSES.has(status.applicationStatus)
   );
 }
 

@@ -71,19 +71,19 @@ export class MatchingController {
     return this.matching.getLatestExplanation(candidateId, jobPostingId);
   }
 
-  // jobPostingId isn't needed as a handler argument — JobAssignmentGuard
-  // already reads it straight off the route to scope HIRING_MANAGER access
-  // before this runs.
   @Get(':candidateId/cv')
   @ApiOperation({
     summary: "Download the candidate's original CV (PDF).",
   })
   @ApiResponse({ status: 200 })
   async downloadCv(
+    @Param('jobPostingId') jobPostingId: string,
     @Param('candidateId') candidateId: string,
   ): Promise<StreamableFile> {
-    const { filePath, displayName } =
-      await this.matching.getResumeFile(candidateId);
+    const { filePath, displayName } = await this.matching.getResumeFile(
+      candidateId,
+      jobPostingId,
+    );
     const buffer = await this.cvStorage.read(filePath);
     return new StreamableFile(buffer, {
       type: 'application/pdf',

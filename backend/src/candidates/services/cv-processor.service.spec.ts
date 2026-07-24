@@ -1,5 +1,6 @@
 import { MatchingService } from '../../matching/matching.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { BackgroundJobQueueService } from '../../shared/background-jobs/background-job-queue.service';
 import { EmbeddingsService } from '../../shared/embeddings/embeddings.service';
 import { PdfTextExtractorService } from '../../shared/pdf/pdf-text-extractor.service';
 import { CvParserService } from './cv-parser.service';
@@ -45,6 +46,9 @@ function buildService() {
   const matching = {
     matchAllPendingApplications: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<MatchingService>;
+  const jobQueue = {
+    registerHandler: jest.fn(),
+  } as unknown as jest.Mocked<BackgroundJobQueueService>;
 
   return {
     service: new CvProcessorService(
@@ -54,9 +58,11 @@ function buildService() {
       parser,
       embeddings,
       matching,
+      jobQueue,
     ),
     prisma,
     matching,
+    jobQueue,
   };
 }
 

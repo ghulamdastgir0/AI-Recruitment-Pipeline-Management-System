@@ -5,7 +5,8 @@ export type CandidateStatus =
   | 'INTERVIEW_COMPLETED'
   | 'FINAL_REVIEW'
   | 'ACCEPTED'
-  | 'REJECTED';
+  | 'REJECTED'
+  | 'WITHDRAWN';
 
 const MAP: Record<string, CandidateStatus> = {
   APPLIED: 'APPLICATION_RECEIVED',
@@ -15,18 +16,22 @@ const MAP: Record<string, CandidateStatus> = {
   INTERVIEW_EXPIRED: 'REJECTED',
   IN_REVIEW: 'INTERVIEW_COMPLETED',
   MANAGER_REVIEW: 'FINAL_REVIEW',
+  MANAGER_REVIEWED: 'FINAL_REVIEW',
   NEXT_ROUND: 'INTERVIEW_PENDING',
   SELECTED: 'ACCEPTED',
   HIRED: 'ACCEPTED',
   REJECTED: 'REJECTED',
-  WITHDRAWN: 'REJECTED',
+  // Its own distinct value — a candidate who withdrew should never be told
+  // "Rejected", which reads as a hiring decision made about them rather
+  // than their own choice.
+  WITHDRAWN: 'WITHDRAWN',
 };
 
 /**
- * Collapses the full internal AppStatus set into the closed 7-value
- * candidate-facing vocabulary. Candidates never see internal stage names
- * (SCREENING, MANAGER_REVIEW, etc.) or a score — just this badge plus the
- * existing situational free-text message.
+ * Collapses the full internal AppStatus set into the closed candidate-facing
+ * vocabulary. Candidates never see internal stage names (SCREENING,
+ * MANAGER_REVIEW, etc.) or a score — just this badge plus the existing
+ * situational free-text message.
  */
 export function toCandidateStatus(appStatus: string): CandidateStatus {
   return MAP[appStatus] ?? 'UNDER_REVIEW';

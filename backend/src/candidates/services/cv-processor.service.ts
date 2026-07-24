@@ -1,10 +1,14 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { MatchingService } from '../../matching/matching.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { BackgroundJobQueueService } from '../../shared/background-jobs/background-job-queue.service';
 import { EmbeddingsService } from '../../shared/embeddings/embeddings.service';
 import { PdfTextExtractorService } from '../../shared/pdf/pdf-text-extractor.service';
 import { CvParserService } from './cv-parser.service';
 import { CvStorageService } from './cv-storage.service';
+
+export const CV_PROCESSING_JOB_TYPE = 'cv-processing';
+export const CV_MATCH_ALL_PENDING_JOB_TYPE = 'cv-match-all-pending';
 
 /**
  * Background job body (run exactly once per CandidateProfile, off the
@@ -14,7 +18,7 @@ import { CvStorageService } from './cv-storage.service';
  * and leaves the row FAILED (not silently stuck) otherwise.
  */
 @Injectable()
-export class CvProcessorService {
+export class CvProcessorService implements OnModuleInit {
   private readonly logger = new Logger(CvProcessorService.name);
 
   constructor(
@@ -24,7 +28,17 @@ export class CvProcessorService {
     private readonly parser: CvParserService,
     private readonly embeddings: EmbeddingsService,
     private readonly matching: MatchingService,
+    private readonly jobQueue: BackgroundJobQueueService,
   ) {}
+
+  onModuleInit(): void {
+    this.jobQueue.registerHandler(CV_PROCESSING_JOB_TYPE, (targetId) =>
+      this.process(targetId),
+    );
+    this.jobQueue.registerHandler(CV_MATCH_ALL_PENDING_JOB_TYPE, (targetId) =>
+      this.matching.matchAllPendingApplications(targetId),
+    );
+  }
 
   async process(candidateProfileId: string): Promise<void> {
     const profile = await this.prisma.candidateProfile.findUniqueOrThrow({

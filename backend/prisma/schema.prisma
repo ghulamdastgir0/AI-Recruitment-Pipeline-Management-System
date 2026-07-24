@@ -285,6 +285,19 @@ model Application {
   jobId              String
   status             AppStatus @default(APPLIED)
 
+  // Denormalized (lowercased) snapshot of the applying email at CV-upload
+  // time, existing solely to let Postgres itself enforce "no two
+  // applications for the same job with the same email" — the
+  // candidateEmail this needs to compare against otherwise lives on
+  // CandidateProfile, one table away, so an application-level unique index
+  // couldn't reference it directly. Two concurrent uploads with the same
+  // email but different file bytes each create their own CandidateProfile,
+  // so a read-then-write check alone (see CvUploadService) can't catch this
+  // race — the DB constraint below is what actually closes it. Null for
+  // uploads with no contact email; Postgres treats NULLs as distinct, so
+  // any number of those coexist without tripping the constraint.
+  applicantEmail String?
+
   // FR-RES-02: hard-gate semantic match score (>=80 advances). Nullable
   // because an Application can now exist before any match has been run
   // (created at CV-upload time by the recruitment assistant).
@@ -310,6 +323,7 @@ model Application {
   matchResults     MatchResult[]
 
   @@unique([candidateProfileId, jobId])
+  @@unique([jobId, applicantEmail])
   @@index([jobId, status])
 }
 
@@ -409,6 +423,13 @@ model AIInterviewSession {
   // Aggregate score derived from the skill matrix below.
   overallScore Decimal? @db.Decimal(5, 2)
 
+  // Interview-level narrative — distinct from the per-skill CandidateSkillGrade
+  // justifications and from MatchResult.recommendation (which is CV-match
+  // only): a plain-language hire/no-hire-leaning summary of the whole
+  // session, generated once grading completes.
+  recommendation String?
+  summary        String? @db.Text
+
   application Application           @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   questions   AIInterviewQuestion[]
   skillGrades CandidateSkillGrade[]
@@ -475,6 +496,26 @@ model EmailLog {
   @@index([applicationId])
 }
 
+// A durably-persisted background job (CV/document processing) — replaces
+// bare in-memory closures so a process restart/crash between "queued" and
+// "processed" doesn't silently lose the job, leaving e.g. a candidate's
+// cvStatus stuck at PROCESSING forever. `type` dispatches to whichever
+// handler registered for it (see BackgroundJobQueueService); `targetId` is
+// the single id (CandidateProfile/Document) the handler needs.
+model BackgroundJob {
+  id       String              @id @default(uuid())
+  type     String
+  targetId String
+  status   BackgroundJobStatus @default(QUEUED)
+  attempts Int                 @default(0)
+  error    String?             @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+}
+
 // ─── Enums ──────────────────────────────────────────────────
 
 enum Role {
@@ -508,6 +549,10 @@ enum AppStatus {
   // HR-explicit stage between the automatic post-interview IN_REVIEW and a
   // final SELECTED/NEXT_ROUND/REJECTED decision — see HiringDecisionsService.moveToManagerReview().
   MANAGER_REVIEW
+  // Set once the assigned Hiring Manager posts their review comment and
+  // marks it done (HiringDecisionsService.markManagerReviewed()) — gates
+  // HR's decide() so a final call always follows manager feedback.
+  MANAGER_REVIEWED
   SELECTED
   NEXT_ROUND
   REJECTED
@@ -532,6 +577,7 @@ enum EmailType {
   NEXT_ROUND
   REJECTION
   BULK_REJECTION
+  OFFER_LETTER
 }
 
 enum WorkModel {
@@ -569,4 +615,12 @@ enum PendingActionStatus {
   CONFIRMED
   EXPIRED
   CANCELLED
+  FAILED
+}
+
+enum BackgroundJobStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
 }

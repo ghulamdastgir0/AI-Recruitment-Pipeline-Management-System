@@ -94,6 +94,29 @@ export class UsersService {
     return toView(user);
   }
 
+  /**
+   * Case-insensitive Hiring Manager lookup by email, for the assistant's
+   * assignHiringManager tool — HR knows the person's email, not their raw
+   * user id, and this only ever resolves to an existing, active Hiring
+   * Manager account (never creates one).
+   */
+  async findHiringManagerByEmail(email: string): Promise<HiringManagerOption> {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        email: { equals: email, mode: 'insensitive' },
+        role: 'HIRING_MANAGER',
+        isActive: true,
+      },
+      select: { id: true, firstName: true, lastName: true, email: true },
+    });
+    if (!user) {
+      throw new NotFoundException(
+        `No active Hiring Manager account found with email "${email}".`,
+      );
+    }
+    return user;
+  }
+
   async update(
     id: string,
     dto: UpdateUserDto,

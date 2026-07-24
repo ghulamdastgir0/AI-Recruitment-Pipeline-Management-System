@@ -28,6 +28,7 @@ interface AssistantReply {
 function AssistantChat() {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,19 +39,25 @@ function AssistantChat() {
     if (!message) return;
     setSending(true);
     setError(null);
-    const nextTurns = [...turns, { role: "user" as const, content: message }];
+    const attachedLabel = attachedFile ? ` (attached: ${attachedFile.name})` : "";
+    const nextTurns = [
+      ...turns,
+      { role: "user" as const, content: message + attachedLabel },
+    ];
     setTurns(nextTurns);
     setInput("");
     try {
       const form = new FormData();
       form.append("message", message);
       form.append("history", JSON.stringify(turns));
+      if (attachedFile) form.append("file", attachedFile);
       const result = await apiFetch<AssistantReply>("/assistant/message", {
         method: "POST",
         body: form,
       });
       setTurns([...nextTurns, { role: "assistant", content: result.reply }]);
       setPendingAction(result.pendingAction ?? null);
+      setAttachedFile(null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to send message.");
     } finally {
@@ -159,16 +166,42 @@ function AssistantChat() {
 
         {error && <p className="text-sm text-danger">{error}</p>}
 
-        <form onSubmit={send} className="flex gap-2">
-          <Input
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            placeholder="Message the assistant…"
-            className="flex-1"
-          />
-          <Button type="submit" disabled={sending || !input.trim()}>
-            {sending ? "Sending…" : "Send"}
-          </Button>
+        <form onSubmit={send} className="flex flex-col gap-2">
+          {attachedFile && (
+            <div className="flex items-center gap-2 self-start rounded-full bg-black/5 px-3 py-1 text-xs text-text-secondary">
+              <span>📎 {attachedFile.name}</span>
+              <button
+                type="button"
+                onClick={() => setAttachedFile(null)}
+                className="font-medium text-text-muted hover:text-text-primary"
+                aria-label="Remove attached file"
+              >
+                ×
+              </button>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <label className="flex cursor-pointer items-center rounded-[var(--radius-control)] border border-border bg-white px-3 text-sm text-text-secondary hover:bg-black/5">
+              <span>📎</span>
+              <input
+                type="file"
+                accept="application/pdf"
+                className="hidden"
+                onChange={(event) =>
+                  setAttachedFile(event.target.files?.[0] ?? null)
+                }
+              />
+            </label>
+            <Input
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              placeholder="Message the assistant…"
+              className="flex-1"
+            />
+            <Button type="submit" disabled={sending || !input.trim()}>
+              {sending ? "Sending…" : "Send"}
+            </Button>
+          </div>
         </form>
       </main>
     </>

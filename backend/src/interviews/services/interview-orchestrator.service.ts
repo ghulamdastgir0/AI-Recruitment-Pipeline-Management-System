@@ -43,6 +43,14 @@ export interface GradeInput {
   skillGroups: SkillEvidenceGroup[];
 }
 
+export const INTERVIEW_RECOMMENDATIONS = [
+  'STRONG_HIRE',
+  'HIRE',
+  'NO_HIRE',
+  'STRONG_NO_HIRE',
+] as const;
+export type InterviewRecommendation = (typeof INTERVIEW_RECOMMENDATIONS)[number];
+
 export interface GradeResult {
   overallScore: number;
   skills: {
@@ -50,6 +58,10 @@ export interface GradeResult {
     proficiencyScore: number;
     justification: string;
   }[];
+  /** Interview-level hire/no-hire-leaning call — distinct from MatchResult.recommendation (CV-match only). */
+  recommendation: InterviewRecommendation;
+  /** Plain-language narrative summarizing the whole session, not just per-skill scores. */
+  summary: string;
 }
 
 const MAX_ATTEMPTS = 3;
@@ -96,9 +108,9 @@ function buildNextTurnTranscriptText(transcript: TranscriptEntry[]): string {
 function buildGradeSystemPrompt(input: GradeInput): string {
   return `You are grading a completed technical interview transcript for a "${input.jobTitle}" role.
 
-For each skill below, assign a proficiencyScore from 0 to 100 and a one-to-two sentence justification citing specifically what the candidate did or didn't demonstrate, comparing their answer(s) against the listed expected core points (your grading rubric — never shown to the candidate). Also produce an overallScore (0-100) summarizing overall technical performance across all skills.
+For each skill below, assign a proficiencyScore from 0 to 100 and a one-to-two sentence justification citing specifically what the candidate did or didn't demonstrate, comparing their answer(s) against the listed expected core points (your grading rubric — never shown to the candidate). Also produce an overallScore (0-100) summarizing overall technical performance across all skills, a recommendation, and a short narrative summary of the whole session (2-4 sentences) — this is decision support for HR, never shown to the candidate.
 
-Return ONLY JSON: { "overallScore": number, "skills": [{ "skillName": string, "proficiencyScore": number, "justification": string }] }
+Return ONLY JSON: { "overallScore": number, "skills": [{ "skillName": string, "proficiencyScore": number, "justification": string }], "recommendation": "STRONG_HIRE"|"HIRE"|"NO_HIRE"|"STRONG_NO_HIRE", "summary": string }
 The skills array must contain exactly one entry per skill listed below, in the same order.`;
 }
 
@@ -294,6 +306,8 @@ export class InterviewOrchestratorService {
             proficiencyScore?: number;
             justification?: string;
           }[];
+          recommendation?: string;
+          summary?: string;
         };
 
         if (
@@ -306,6 +320,11 @@ export class InterviewOrchestratorService {
               typeof s.proficiencyScore === 'number' &&
               typeof s.justification === 'string' &&
               s.justification.trim(),
+          ) &&
+          typeof parsed.summary === 'string' &&
+          parsed.summary.trim() &&
+          INTERVIEW_RECOMMENDATIONS.includes(
+            parsed.recommendation as InterviewRecommendation,
           )
         ) {
           return {
@@ -316,12 +335,15 @@ export class InterviewOrchestratorService {
                 proficiencyScore: clampScore(s.proficiencyScore!),
                 justification: s.justification!.trim(),
               })),
+              recommendation: parsed.recommendation as InterviewRecommendation,
+              summary: parsed.summary.trim(),
             },
           };
         }
         return {
           attempt: attempt + 1,
-          lastError: 'missing/invalid overallScore or skills[] shape',
+          lastError:
+            'missing/invalid overallScore, skills[], recommendation, or summary shape',
         };
       } catch (error) {
         return {

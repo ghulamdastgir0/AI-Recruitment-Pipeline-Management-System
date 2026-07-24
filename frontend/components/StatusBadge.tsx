@@ -13,6 +13,7 @@ const CANDIDATE_STATUS_STYLES: Record<string, string> = {
   FINAL_REVIEW: "bg-info-soft text-info-text",
   ACCEPTED: "bg-success-soft text-success-text",
   REJECTED: "bg-danger-soft text-danger-text",
+  WITHDRAWN: "bg-black/5 text-text-muted",
 };
 
 const INTERNAL_STATUS_STYLES: Record<string, string> = {
@@ -24,6 +25,7 @@ const INTERNAL_STATUS_STYLES: Record<string, string> = {
   INTERVIEW_EXPIRED: "bg-danger-soft text-danger-text",
   IN_REVIEW: "bg-info-soft text-info-text",
   MANAGER_REVIEW: "bg-info-soft text-info-text",
+  MANAGER_REVIEWED: "bg-info-soft text-info-text",
   NEXT_ROUND: "bg-warning-soft text-warning-text",
   SELECTED: "bg-success-soft text-success-text",
   HIRED: "bg-success-soft text-success-text",
@@ -35,6 +37,13 @@ const INTERNAL_STATUS_STYLES: Record<string, string> = {
   PAUSED: "bg-warning-soft text-warning-text",
   CLOSED: "bg-black/5 text-text-muted",
   ARCHIVED: "bg-black/5 text-text-muted",
+};
+
+const DOCUMENT_STATUS_STYLES: Record<string, string> = {
+  PROCESSING: "bg-warning-soft text-warning-text",
+  ACTIVE: "bg-success-soft text-success-text",
+  INACTIVE: "bg-black/5 text-text-muted",
+  FAILED: "bg-danger-soft text-danger-text",
 };
 
 const DEFAULT_STYLE = "bg-black/5 text-text-secondary";
@@ -63,6 +72,15 @@ export function InternalStatusBadge({ status }: { status: string }) {
     <Badge
       label={status}
       className={INTERNAL_STATUS_STYLES[status] ?? DEFAULT_STYLE}
+    />
+  );
+}
+
+export function DocumentStatusBadge({ status }: { status: string }) {
+  return (
+    <Badge
+      label={status}
+      className={DOCUMENT_STATUS_STYLES[status] ?? DEFAULT_STYLE}
     />
   );
 }

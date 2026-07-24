@@ -15,6 +15,7 @@ function buildService() {
     application: {
       upsert: jest.fn(),
       update: jest.fn().mockResolvedValue({}),
+      findUnique: jest.fn(),
     },
     matchResult: { create: jest.fn() },
     aIInterviewSession: { create: jest.fn().mockResolvedValue({}) },
@@ -206,15 +207,17 @@ describe('MatchingService — screening decision gate', () => {
 describe('MatchingService.getResumeFile', () => {
   it('resolves the stored file path and a display name from candidate identity', async () => {
     const { service, prisma } = buildService();
-    (prisma.candidateProfile.findUnique as jest.Mock).mockResolvedValue({
-      resumeFilePath: '/storage/cvs/abc-resume.pdf',
-      candidateName: 'Jane Candidate',
-      candidateEmail: null,
-      candidatePhone: null,
-      extractedDataJson: null,
+    (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+      candidateProfile: {
+        resumeFilePath: '/storage/cvs/abc-resume.pdf',
+        candidateName: 'Jane Candidate',
+        candidateEmail: null,
+        candidatePhone: null,
+        extractedDataJson: null,
+      },
     });
 
-    const result = await service.getResumeFile('cand-1');
+    const result = await service.getResumeFile('cand-1', 'job-1');
 
     expect(result).toEqual({
       filePath: '/storage/cvs/abc-resume.pdf',
@@ -224,21 +227,43 @@ describe('MatchingService.getResumeFile', () => {
 
   it('throws NotFoundException when the candidate has no resume file on record', async () => {
     const { service, prisma } = buildService();
-    (prisma.candidateProfile.findUnique as jest.Mock).mockResolvedValue({
-      resumeFilePath: null,
+    (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+      candidateProfile: { resumeFilePath: null },
     });
 
-    await expect(service.getResumeFile('cand-1')).rejects.toThrow(
-      'No CV file found for candidate "cand-1".',
+    await expect(service.getResumeFile('cand-1', 'job-1')).rejects.toThrow(
+      'No CV file found for candidate "cand-1" on job posting "job-1".',
     );
   });
 
-  it('throws NotFoundException when the candidate profile does not exist', async () => {
+  it('throws NotFoundException when no application exists for this candidate/job pair', async () => {
     const { service, prisma } = buildService();
-    (prisma.candidateProfile.findUnique as jest.Mock).mockResolvedValue(null);
+    (prisma.application.findUnique as jest.Mock).mockResolvedValue(null);
 
-    await expect(service.getResumeFile('cand-missing')).rejects.toThrow(
-      'No CV file found for candidate "cand-missing".',
+    await expect(
+      service.getResumeFile('cand-missing', 'job-1'),
+    ).rejects.toThrow(
+      'No CV file found for candidate "cand-missing" on job posting "job-1".',
     );
+  });
+
+  it('does not return a CV for a candidate who applied to a different job', async () => {
+    const { service, prisma } = buildService();
+    (prisma.application.findUnique as jest.Mock).mockResolvedValue(null);
+
+    await expect(
+      service.getResumeFile('cand-1', 'job-unrelated'),
+    ).rejects.toThrow(
+      'No CV file found for candidate "cand-1" on job posting "job-unrelated".',
+    );
+    expect(prisma.application.findUnique).toHaveBeenCalledWith({
+      where: {
+        candidateProfileId_jobId: {
+          candidateProfileId: 'cand-1',
+          jobId: 'job-unrelated',
+        },
+      },
+      include: { candidateProfile: true },
+    });
   });
 });

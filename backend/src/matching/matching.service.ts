@@ -344,21 +344,33 @@ export class MatchingService {
     };
   }
 
-  /** Resolves the on-disk path for a candidate's original CV, for the staff CV-download endpoint. Never returns the path itself to a caller outside this service. */
+  /**
+   * Resolves the on-disk path for a candidate's original CV, for the staff
+   * CV-download endpoint. Requires `jobPostingId` and verifies an
+   * `Application` actually exists for that exact (candidateId, jobPostingId)
+   * pair first — mirrors the same re-derivation `getLatestExplanation` above
+   * already does — so a Hiring Manager assigned to job A can't pull a CV for
+   * a candidate who only ever applied to unrelated job B. Never returns the
+   * path itself to a caller outside this service.
+   */
   async getResumeFile(
     candidateProfileId: string,
+    jobPostingId: string,
   ): Promise<{ filePath: string; displayName: string }> {
-    const candidate = await this.prisma.candidateProfile.findUnique({
-      where: { id: candidateProfileId },
+    const application = await this.prisma.application.findUnique({
+      where: {
+        candidateProfileId_jobId: { candidateProfileId, jobId: jobPostingId },
+      },
+      include: { candidateProfile: true },
     });
-    if (!candidate?.resumeFilePath) {
+    if (!application?.candidateProfile?.resumeFilePath) {
       throw new NotFoundException(
-        `No CV file found for candidate "${candidateProfileId}".`,
+        `No CV file found for candidate "${candidateProfileId}" on job posting "${jobPostingId}".`,
       );
     }
-    const { name } = resolveCandidateIdentity(candidate);
+    const { name } = resolveCandidateIdentity(application.candidateProfile);
     return {
-      filePath: candidate.resumeFilePath,
+      filePath: application.candidateProfile.resumeFilePath,
       displayName: `${name ?? candidateProfileId}.pdf`,
     };
   }

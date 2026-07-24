@@ -6,11 +6,12 @@ import {
 } from '@nestjs/common';
 import { AuditLogService } from '../audit/audit-log.service';
 import { UploadedCv } from '../candidates/services/cv-upload.service';
+import { JobPostingsService } from '../job-postings/job-postings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmClientService } from '../shared/llm/llm-client.service';
 import { ChatMessage } from '../shared/llm/llm-client.types';
 import { ASSISTANT_SYSTEM_PROMPT } from './system-prompt';
-import { ASSISTANT_TOOLS } from './tool-definitions';
+import { AssistantToolDefinition, selectAssistantTools } from './tool-definitions';
 import { ToolRegistryService } from './tool-registry.service';
 
 export interface AssistantMessageInput {
@@ -33,11 +34,17 @@ export interface AssistantReply {
 const MAX_TOOL_ITERATIONS = 5;
 const PENDING_ACTION_TTL_MINUTES = 30;
 const RETRY_DELAY_MS = 1500;
+// gpt-oss-20b sticks to well-formed JSON tool calls far more reliably than
+// the previous default (llama-3.3-70b-versatile), which would intermittently
+// emit a non-JSON pseudo-XML function-call token under this tool-calling
+// workload and get the whole completion rejected by Groq.
+const ASSISTANT_MODEL = 'openai/gpt-oss-20b';
 
 /**
  * The tool-calling loop. The LLM never touches the DB/filesystem — it only
- * ever sees ASSISTANT_TOOLS' JSON schemas and gets back whatever
- * ToolRegistryService.execute() returns. Gated tools (publishJobPosting,
+ * ever sees the JSON schemas selectAssistantTools() picked for this message
+ * and gets back whatever ToolRegistryService.execute() returns. Gated tools
+ * (publishJobPosting,
  * status-changing updateJobPosting) are intercepted here and never actually
  * executed in this loop — see confirmAction().
  */
@@ -50,6 +57,7 @@ export class AssistantOrchestratorService {
     private readonly toolRegistry: ToolRegistryService,
     private readonly prisma: PrismaService,
     private readonly audit: AuditLogService,
+    private readonly jobPostings: JobPostingsService,
   ) {}
 
   async handleMessage(
@@ -67,10 +75,20 @@ export class AssistantOrchestratorService {
       { role: 'user', content: userMessage },
     ];
 
+    // Picked once per incoming message (not per tool-loop iteration) so a
+    // multi-step chain like findJobPosting -> resumeJobPosting keeps access
+    // to the same group throughout.
+    const tools = selectAssistantTools(
+      messages
+        .filter((m) => m.role !== 'system')
+        .map((m) => m.content ?? '')
+        .join('\n'),
+    );
+
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       let message: ChatMessage;
       try {
-        message = await this.chatWithRetry(messages);
+        message = await this.chatWithRetry(messages, tools);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         this.logger.warn(`LLM call failed: ${reason}`);
@@ -92,8 +110,12 @@ export class AssistantOrchestratorService {
             args,
             actorUserId,
           );
+          const description = await this.describeAction(
+            toolCall.function.name,
+            args,
+          );
           return {
-            reply: `This needs your explicit confirmation before I do it: ${describeAction(toolCall.function.name, args)}. Confirm via the "Confirm" action (id: ${pending.id}), or cancel it.`,
+            reply: `This needs your explicit confirmation before I do it: ${description}. Confirm via the "Confirm" action (id: ${pending.id}), or cancel it.`,
             pendingAction: {
               actionId: pending.id,
               tool: toolCall.function.name,
@@ -129,6 +151,16 @@ export class AssistantOrchestratorService {
     };
   }
 
+  /**
+   * Deliberately does not restrict confirmation to `requestedByUserId` —
+   * any HR_ADMIN/SUPER_ADMIN (the only roles with assistant access at all,
+   * per AssistantController's @Roles guard) can confirm or cancel a
+   * pending action a teammate proposed. Treated as intentional (a small
+   * HR team picking up and finishing each other's in-progress work) rather
+   * than a gap; `requestedByUserId` is still recorded so the audit trail
+   * shows who proposed vs. who confirmed. Revisit if/when this needs to be
+   * restricted to the original requester.
+   */
   async confirmAction(
     actionId: string,
     confirmedByUserId: string,
@@ -159,20 +191,29 @@ export class AssistantOrchestratorService {
       actorUserId: confirmedByUserId,
     });
 
+    // Only a genuinely successful tool call is recorded as CONFIRMED — a
+    // confirm that hits e.g. the missing-Hiring-Manager check must be
+    // distinguishable (here and in the audit trail) from one that actually
+    // executed, not just differ in the chat reply text.
     await this.prisma.pendingAssistantAction.update({
       where: { id: actionId },
-      data: { status: 'CONFIRMED', confirmedAt: new Date(), confirmedByUserId },
+      data: {
+        status: outcome.ok ? 'CONFIRMED' : 'FAILED',
+        confirmedAt: new Date(),
+        confirmedByUserId,
+      },
     });
     await this.audit.record({
       actorUserId: confirmedByUserId,
       action: `confirm:${action.tool}`,
       resourceType: 'PendingAssistantAction',
       resourceId: actionId,
-      details: { args },
+      details: { args, ok: outcome.ok },
     });
 
+    const description = await this.describeAction(action.tool, args);
     return outcome.ok
-      ? { reply: `Done — ${describeAction(action.tool, args)} completed.` }
+      ? { reply: `Done — ${description} completed.` }
       : {
           reply: `That failed: ${(outcome.result as { error?: string }).error ?? 'unknown error'}`,
         };
@@ -211,10 +252,13 @@ export class AssistantOrchestratorService {
    * seconds, far longer than we should block a chat reply for, so retrying
    * immediately would just fail again for no benefit.
    */
-  private async chatWithRetry(messages: ChatMessage[]): Promise<ChatMessage> {
+  private async chatWithRetry(
+    messages: ChatMessage[],
+    tools: AssistantToolDefinition[],
+  ): Promise<ChatMessage> {
+    const options = { tools, model: ASSISTANT_MODEL };
     try {
-      return (await this.llm.chat(messages, { tools: ASSISTANT_TOOLS }))
-        .message;
+      return (await this.llm.chat(messages, options)).message;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       if (/rate_limit_exceeded|429/i.test(reason)) {
@@ -222,8 +266,7 @@ export class AssistantOrchestratorService {
       }
       this.logger.warn(`LLM call failed, retrying once: ${reason}`);
       await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-      return (await this.llm.chat(messages, { tools: ASSISTANT_TOOLS }))
-        .message;
+      return (await this.llm.chat(messages, options)).message;
     }
   }
 
@@ -245,6 +288,43 @@ export class AssistantOrchestratorService {
       },
     });
   }
+
+  /**
+   * Resolves the job posting (and its current title/status) server-side
+   * before describing a gated action back to HR — the model's raw arguments
+   * are just a UUID, which gives HR no way to visually confirm they're
+   * about to publish/delete/change the job they actually think they are.
+   * Falls back to the bare id if the job can't be resolved (e.g. it's since
+   * been deleted) rather than failing the description outright.
+   */
+  private async describeAction(
+    tool: string,
+    args: Record<string, unknown>,
+  ): Promise<string> {
+    const jobPostingId =
+      typeof args.jobPostingId === 'string' ? args.jobPostingId : undefined;
+    const jobLabel = jobPostingId
+      ? await this.describeJobPosting(jobPostingId)
+      : undefined;
+
+    if (tool === 'publishJobPosting') return `publish job posting ${jobLabel}`;
+    if (tool === 'deleteJobPosting')
+      return `permanently delete job posting ${jobLabel} and all of its applications/interviews/emails`;
+    if (tool === 'updateJobPosting') {
+      const changes = args.changes as Record<string, unknown> | undefined;
+      return `change job posting ${jobLabel} status to ${String(changes?.status)}`;
+    }
+    return `${tool}(${JSON.stringify(args)})`;
+  }
+
+  private async describeJobPosting(jobPostingId: string): Promise<string> {
+    try {
+      const job = await this.jobPostings.getById(jobPostingId);
+      return `"${job.title}" (currently ${job.status}, id ${jobPostingId})`;
+    } catch {
+      return jobPostingId;
+    }
+  }
 }
 
 function describeLlmFailure(reason: string): string {
@@ -252,14 +332,4 @@ function describeLlmFailure(reason: string): string {
     return 'The assistant is temporarily rate-limited — please wait a few seconds and try again.';
   }
   return 'The assistant is temporarily unavailable — please try again in a moment.';
-}
-
-function describeAction(tool: string, args: Record<string, unknown>): string {
-  if (tool === 'publishJobPosting')
-    return `publish job posting ${String(args.jobPostingId)}`;
-  if (tool === 'updateJobPosting') {
-    const changes = args.changes as Record<string, unknown> | undefined;
-    return `change job posting ${String(args.jobPostingId)} status to ${String(changes?.status)}`;
-  }
-  return `${tool}(${JSON.stringify(args)})`;
 }

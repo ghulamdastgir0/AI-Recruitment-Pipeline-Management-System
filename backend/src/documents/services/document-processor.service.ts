@@ -1,10 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { BackgroundJobQueueService } from '../../shared/background-jobs/background-job-queue.service';
 import { EmbeddingsService } from '../../shared/embeddings/embeddings.service';
 import { FileStorageService } from './file-storage.service';
 import { PdfTextExtractorService } from '../../shared/pdf/pdf-text-extractor.service';
 import { TextChunkerService } from './text-chunker.service';
+
+export const DOCUMENT_PROCESSING_JOB_TYPE = 'document-processing';
 
 /**
  * Runs the extract -> chunk -> embed pipeline for a single Document row,
@@ -15,7 +18,7 @@ import { TextChunkerService } from './text-chunker.service';
  * chatbot without a usable active version.
  */
 @Injectable()
-export class DocumentProcessorService {
+export class DocumentProcessorService implements OnModuleInit {
   private readonly logger = new Logger(DocumentProcessorService.name);
 
   constructor(
@@ -24,7 +27,14 @@ export class DocumentProcessorService {
     private readonly pdfExtractor: PdfTextExtractorService,
     private readonly chunker: TextChunkerService,
     private readonly embeddings: EmbeddingsService,
+    private readonly jobQueue: BackgroundJobQueueService,
   ) {}
+
+  onModuleInit(): void {
+    this.jobQueue.registerHandler(DOCUMENT_PROCESSING_JOB_TYPE, (targetId) =>
+      this.process(targetId),
+    );
+  }
 
   async process(documentId: string): Promise<void> {
     const document = await this.prisma.document.findUniqueOrThrow({

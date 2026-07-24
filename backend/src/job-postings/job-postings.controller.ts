@@ -59,15 +59,21 @@ export class JobPostingsController {
   @Roles('SUPER_ADMIN', 'HR_ADMIN', 'HIRING_MANAGER')
   @ApiOperation({
     summary:
-      'List job postings, optionally filtered by status. Hiring Managers only see job postings they are assigned to.',
+      'List job postings, optionally filtered by status/title search and paginated. Hiring Managers only see job postings they are assigned to.',
   })
   @ApiResponse({ status: 200, type: [JobPostingResponseDto] })
   async list(
     @CurrentUser() user: AuthenticatedUser,
     @Query('status') status?: string,
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
   ): Promise<JobPostingResponseDto[]> {
     return this.jobPostings.list({
       status,
+      search,
+      page: page ? Number(page) : undefined,
+      pageSize: pageSize ? Number(pageSize) : undefined,
       assignedToUserId: user.role === 'HIRING_MANAGER' ? user.id : undefined,
     });
   }

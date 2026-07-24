@@ -6,12 +6,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AuditLogService } from '../../audit/audit-log.service';
-import { MatchingService } from '../../matching/matching.service';
+import { Prisma } from '../../generated/prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { BackgroundJobQueueService } from '../../shared/background-jobs/background-job-queue.service';
 import { EmailService } from '../../shared/email/email.service';
 import { CandidateLinksService } from '../../shared/links/candidate-links.service';
-import { CvProcessorService } from './cv-processor.service';
+import {
+  CV_MATCH_ALL_PENDING_JOB_TYPE,
+  CV_PROCESSING_JOB_TYPE,
+} from './cv-processor.service';
 import { CvStorageService } from './cv-storage.service';
 
 export interface UploadedCv {
@@ -47,9 +50,7 @@ export class CvUploadService {
     private readonly prisma: PrismaService,
     private readonly storage: CvStorageService,
     private readonly jobQueue: BackgroundJobQueueService,
-    private readonly processor: CvProcessorService,
     private readonly audit: AuditLogService,
-    private readonly matching: MatchingService,
     private readonly email: EmailService,
     private readonly links: CandidateLinksService,
   ) {}
@@ -101,9 +102,15 @@ export class CvUploadService {
         },
       });
       if (alreadyApplied) {
-        throw new ConflictException(
-          'You have already applied to this job posting with this email address.',
-        );
+        // Structured payload (not just a message string) — the apply form
+        // uses applicationId to link straight back to the existing
+        // application's status page instead of leaving the candidate with
+        // a dead-end error and no way to find what they already submitted.
+        throw new ConflictException({
+          message:
+            'You have already applied to this job posting with this email address.',
+          applicationId: alreadyApplied.id,
+        });
       }
     }
 
@@ -130,7 +137,7 @@ export class CvUploadService {
           candidatePhone: contact?.phone,
         },
       });
-      this.jobQueue.enqueue(() => this.processor.process(profile!.id));
+      await this.jobQueue.enqueue(CV_PROCESSING_JOB_TYPE, profile.id);
     } else if (contact) {
       // Dedupe-reuse path: the same CV bytes were already on file for this
       // profile, so no create() ran above to persist contact info — a
@@ -146,20 +153,47 @@ export class CvUploadService {
       });
     }
 
-    const application = await this.prisma.application.upsert({
-      where: {
-        candidateProfileId_jobId: {
+    const applicantEmail = contact?.email?.toLowerCase() ?? null;
+    let application: { id: string };
+    try {
+      application = await this.prisma.application.upsert({
+        where: {
+          candidateProfileId_jobId: {
+            candidateProfileId: profile.id,
+            jobId: jobPostingId,
+          },
+        },
+        update: {},
+        create: {
           candidateProfileId: profile.id,
           jobId: jobPostingId,
+          status: 'APPLIED',
+          applicantEmail,
         },
-      },
-      update: {},
-      create: {
-        candidateProfileId: profile.id,
-        jobId: jobPostingId,
-        status: 'APPLIED',
-      },
-    });
+      });
+    } catch (error) {
+      // Closes the race the findFirst check above can't: two near-simultaneous
+      // uploads with the same email but different file bytes each create their
+      // own CandidateProfile and pass the check before either has written —
+      // the (jobId, applicantEmail) unique index is what actually stops the
+      // second one from landing as a duplicate Application.
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        const winner = applicantEmail
+          ? await this.prisma.application.findFirst({
+              where: { jobId: jobPostingId, applicantEmail },
+            })
+          : null;
+        throw new ConflictException({
+          message:
+            'You have already applied to this job posting with this email address.',
+          applicationId: winner?.id,
+        });
+      }
+      throw error;
+    }
 
     if (uploadedByUserId) {
       await this.audit.record({
@@ -197,12 +231,7 @@ export class CvUploadService {
       // CvProcessorService won't run again for it, so this Application row
       // (just created/confirmed above) is the only place left to trigger
       // scoring against this job posting.
-      const readyProfileId = profile.id;
-      this.jobQueue.enqueue(() =>
-        this.matching
-          .matchAllPendingApplications(readyProfileId)
-          .then(() => undefined),
-      );
+      await this.jobQueue.enqueue(CV_MATCH_ALL_PENDING_JOB_TYPE, profile.id);
     }
 
     return {

@@ -7,6 +7,7 @@ const SILENCE_THRESHOLD = 0.02; // RMS amplitude below this counts as silence
 const SILENCE_MS = 10_000;
 const MAX_TURN_MS = 120_000; // safety cap if the candidate never pauses
 const COUNTDOWN_WARN_MS = 5_000; // show the countdown once this close to auto-submit
+const TICK_INTERVAL_MS = 100; // setInterval, not requestAnimationFrame — keeps ticking in a backgrounded tab
 
 /**
  * Hands-free answer capture: while `active`, continuously records from the
@@ -29,7 +30,7 @@ export function AudioRecorder({
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const rafRef = useRef<number | null>(null);
+  const tickIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastSpeechAtRef = useRef(0);
   const turnStartAtRef = useRef(0);
   const submittedRef = useRef(false);
@@ -76,7 +77,7 @@ export function AudioRecorder({
     function stopAndSubmit() {
       if (submittedRef.current) return;
       submittedRef.current = true;
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      if (tickIntervalRef.current !== null) clearInterval(tickIntervalRef.current);
       recorder.stop();
     }
 
@@ -100,17 +101,19 @@ export function AudioRecorder({
         nowTs - turnStartAtRef.current >= MAX_TURN_MS
       ) {
         stopAndSubmit();
-        return;
       }
-      rafRef.current = requestAnimationFrame(tick);
     }
 
     recorderRef.current = recorder;
     recorder.start(250);
-    rafRef.current = requestAnimationFrame(tick);
+    // setInterval (not requestAnimationFrame) so silence/max-duration detection
+    // keeps running — at a throttled but nonzero rate — if the candidate
+    // switches tabs mid-answer; rAF fully suspends in backgrounded tabs and
+    // would otherwise leave the recording (and the interview) hanging forever.
+    tickIntervalRef.current = setInterval(tick, TICK_INTERVAL_MS);
 
     return () => {
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+      if (tickIntervalRef.current !== null) clearInterval(tickIntervalRef.current);
       if (recorder.state !== "inactive") {
         recorder.onstop = null;
         recorder.stop();
@@ -123,7 +126,7 @@ export function AudioRecorder({
   function submitNow() {
     if (submittedRef.current) return;
     submittedRef.current = true;
-    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    if (tickIntervalRef.current !== null) clearInterval(tickIntervalRef.current);
     recorderRef.current?.stop();
   }
 
