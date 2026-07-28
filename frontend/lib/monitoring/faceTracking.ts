@@ -1,3 +1,4 @@
+import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 
 // Hosted by Google — fetched once at runtime and cached by the browser, same
@@ -13,6 +14,14 @@ export interface FacePoseResult {
   /** Radians, magnitude only matters (sign convention isn't calibrated) — used purely as an away-from-screen threshold. */
   yaw: number;
   pitch: number;
+  /**
+   * Raw landmarks (468 face-mesh points + indices 468-477 iris) for the
+   * first detected face, or null when no face is present. This is the same
+   * detection pass used for yaw/pitch above — exposed so eye tracking
+   * (useEyeTracking) can derive gaze/blink from it without a second
+   * detectForVideo() call or a second camera stream.
+   */
+  landmarks: NormalizedLandmark[] | null;
 }
 
 // MediaPipe's WASM runtime logs its own informational lines (delegate
@@ -85,15 +94,16 @@ export function detectFacePose(
 ): FacePoseResult {
   const result = landmarker.detectForVideo(video, timestampMs);
   const faceCount = result.faceLandmarks?.length ?? 0;
+  const landmarks = result.faceLandmarks?.[0] ?? null;
   const matrix = result.facialTransformationMatrixes?.[0]?.data;
-  if (!matrix) return { faceCount, yaw: 0, pitch: 0 };
+  if (!matrix) return { faceCount, yaw: 0, pitch: 0, landmarks };
 
   const r00 = matrix[0];
   const r10 = matrix[4];
   const r20 = matrix[8];
   const r21 = matrix[9];
   const r22 = matrix[10];
-  const yaw = Math.atan2(-r20, Math.sqrt(r00 * r00 + r10 * r10));
+  const yaw = Math.atan2(-r20, Math.hypot(r00, r10));
   const pitch = Math.atan2(r21, r22);
-  return { faceCount, yaw, pitch };
+  return { faceCount, yaw, pitch, landmarks };
 }

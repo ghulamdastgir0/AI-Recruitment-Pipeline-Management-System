@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "ViolationType" ADD VALUE 'RAPID_GAZE_SWITCHING';

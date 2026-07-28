@@ -503,7 +503,7 @@ describe('JobPostingsService.create — candidate-safe summary drafting', () => 
 describe('JobPostingsService.create — duplicate-draft guard', () => {
   const rawPrompt = 'Hire a backend engineer';
 
-  it('updates the existing DRAFT instead of inserting a new row when the assistant re-calls createJobPosting with the same rawPrompt', async () => {
+  it('updates the existing DRAFT instead of inserting a new row when the assistant re-calls createJobPosting with the same title', async () => {
     const { service, prisma, llm } = buildService();
     (prisma.job.findFirst as jest.Mock).mockResolvedValue(
       jobRow({ id: 'job-existing' }),
@@ -535,7 +535,7 @@ describe('JobPostingsService.create — duplicate-draft guard', () => {
       expect.objectContaining({
         where: expect.objectContaining({
           createdByUserId: 'user-1',
-          rawPrompt,
+          title: { equals: 'Backend Engineer', mode: 'insensitive' },
           status: 'DRAFT',
         }),
       }),
@@ -551,6 +551,40 @@ describe('JobPostingsService.create — duplicate-draft guard', () => {
       }),
     );
     expect(result).toBeDefined();
+  });
+
+  it('still catches the duplicate when rawPrompt/other fields differ between calls (the assistant regenerates rawPrompt text itself, so it is not reliably identical across calls)', async () => {
+    const { service, prisma, llm } = buildService();
+    (prisma.job.findFirst as jest.Mock).mockResolvedValue(
+      jobRow({ id: 'job-existing' }),
+    );
+    llm.chat.mockResolvedValue({
+      message: {
+        role: 'assistant',
+        content: JSON.stringify({
+          description: 'Updated description with location.',
+          candidateSummary: 'Updated blurb.',
+        }),
+      },
+      finishReason: 'stop',
+    });
+
+    await service.create(
+      {
+        title: 'Frontend Web Developer',
+        rawPrompt: 'Create a frontend web dev job, junior, onsite, Lahore Pakistan',
+        experienceMin: 1,
+        hiringTarget: 1,
+        deadline: new Date().toISOString(),
+        location: 'Lahore, Pakistan',
+      },
+      'user-1',
+    );
+
+    expect(prisma.job.create).not.toHaveBeenCalled();
+    expect(prisma.job.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'job-existing' } }),
+    );
   });
 
   it('inserts normally when no recent matching DRAFT exists', async () => {

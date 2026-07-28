@@ -29,7 +29,7 @@ const createJobPosting: AssistantToolDefinition = {
   function: {
     name: 'createJobPosting',
     description:
-      'Create a new job posting as a DRAFT. If `description` is omitted, one is drafted from company documents — always show HR the result and let them ask for changes before publishing.',
+      'Create a new job posting as a DRAFT. If `description` is omitted, one is drafted from company documents — always show HR the result and let them ask for changes before publishing. Only call this once real values for title, experienceMin, deadline, and hiringTarget are known — never with guessed/placeholder values to satisfy the schema early. If a draft for this role already exists in this conversation, call updateJobPosting on its id instead of calling this again.',
     parameters: {
       type: 'object',
       properties: {

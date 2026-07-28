@@ -1,6 +1,8 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
+import { FormattedMessage } from "@/components/assistant/FormattedMessage";
+import { JobPostingCard, type JobPostingSummary } from "@/components/assistant/JobPostingCard";
 import { RoleGuard } from "@/components/RoleGuard";
 import { StaffNav } from "@/components/StaffNav";
 import { Button } from "@/components/ui/Button";
@@ -11,6 +13,7 @@ import { apiFetch, ApiError, postJson } from "@/lib/api";
 interface ChatTurn {
   role: "user" | "assistant";
   content: string;
+  jobPosting?: JobPostingSummary;
 }
 
 interface PendingAction {
@@ -23,6 +26,7 @@ interface PendingAction {
 interface AssistantReply {
   reply: string;
   pendingAction?: PendingAction;
+  jobPosting?: JobPostingSummary;
 }
 
 function AssistantChat() {
@@ -32,6 +36,13 @@ function AssistantChat() {
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  // Keeps the scrollable message list (not the whole page) pinned to the
+  // latest turn as the conversation grows.
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [turns, pendingAction]);
 
   async function send(event: FormEvent) {
     event.preventDefault();
@@ -55,7 +66,10 @@ function AssistantChat() {
         method: "POST",
         body: form,
       });
-      setTurns([...nextTurns, { role: "assistant", content: result.reply }]);
+      setTurns([
+        ...nextTurns,
+        { role: "assistant", content: result.reply, jobPosting: result.jobPosting },
+      ]);
       setPendingAction(result.pendingAction ?? null);
       setAttachedFile(null);
     } catch (err) {
@@ -74,7 +88,10 @@ function AssistantChat() {
         `/assistant/actions/${pendingAction.actionId}/confirm`,
         {},
       );
-      setTurns((prev) => [...prev, { role: "assistant", content: result.reply }]);
+      setTurns((prev) => [
+        ...prev,
+        { role: "assistant", content: result.reply, jobPosting: result.jobPosting },
+      ]);
       setPendingAction(result.pendingAction ?? null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to confirm action.");
@@ -115,53 +132,62 @@ function AssistantChat() {
           </p>
         </div>
 
-        <Card className="flex min-h-[400px] flex-col gap-3 p-4">
-          {turns.length === 0 && (
-            <p className="text-sm text-text-muted">
-              Ask the assistant to create job postings, look up candidates, or
-              rank applicants for a role.
-            </p>
-          )}
-          {turns.map((turn, index) => (
-            <div
-              key={index}
-              className={
-                turn.role === "user"
-                  ? "self-end rounded-2xl rounded-br-sm bg-brand-600 px-3.5 py-2 text-sm text-white"
-                  : "self-start rounded-2xl rounded-bl-sm bg-black/5 px-3.5 py-2 text-sm text-text-primary"
-              }
-            >
-              {turn.content}
-            </div>
-          ))}
-
-          {pendingAction && (
-            <div className="self-start rounded-[var(--radius-control)] border border-warning/40 bg-warning-soft p-3 text-sm">
-              <p className="font-medium text-warning-text">
-                Confirm action: {pendingAction.tool}
-              </p>
-              <pre className="mt-1 overflow-x-auto text-xs text-warning-text">
-                {JSON.stringify(pendingAction.args, null, 2)}
-              </pre>
-              <div className="mt-2 flex gap-2">
-                <Button
-                  onClick={confirmAction}
-                  disabled={sending}
-                  className="px-3 py-1 text-xs"
-                >
-                  Confirm
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={cancelAction}
-                  disabled={sending}
-                  className="px-3 py-1 text-xs"
-                >
-                  Cancel
-                </Button>
+        <Card className="flex h-[65vh] flex-col overflow-hidden p-0">
+          <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-4">
+            {turns.length === 0 && (
+              <div className="flex flex-1 items-center justify-center">
+                <p className="max-w-xs text-center text-sm text-text-muted">
+                  Ask the assistant to create job postings, look up candidates,
+                  or rank applicants for a role.
+                </p>
               </div>
-            </div>
-          )}
+            )}
+            {turns.map((turn, index) => (
+              <div
+                key={index}
+                className={
+                  turn.role === "user"
+                    ? "max-w-[85%] self-end rounded-2xl rounded-br-sm bg-brand-600 px-3.5 py-2 text-sm text-white"
+                    : "max-w-[85%] self-start rounded-2xl rounded-bl-sm bg-black/5 px-3.5 py-2 text-sm text-text-primary"
+                }
+              >
+                {turn.role === "assistant" ? (
+                  <FormattedMessage content={turn.content} />
+                ) : (
+                  <span className="whitespace-pre-wrap">{turn.content}</span>
+                )}
+              </div>
+            ))}
+
+            {pendingAction && (
+              <div className="max-w-[85%] self-start rounded-[var(--radius-control)] border border-warning/40 bg-warning-soft p-3 text-sm">
+                <p className="font-medium text-warning-text">
+                  Confirm action: {pendingAction.tool}
+                </p>
+                <pre className="mt-1 overflow-x-auto text-xs text-warning-text">
+                  {JSON.stringify(pendingAction.args, null, 2)}
+                </pre>
+                <div className="mt-2 flex gap-2">
+                  <Button
+                    onClick={confirmAction}
+                    disabled={sending}
+                    className="px-3 py-1 text-xs"
+                  >
+                    Confirm
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={cancelAction}
+                    disabled={sending}
+                    className="px-3 py-1 text-xs"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
+            <div ref={bottomRef} />
+          </div>
         </Card>
 
         {error && <p className="text-sm text-danger">{error}</p>}

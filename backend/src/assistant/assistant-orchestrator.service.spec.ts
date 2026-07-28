@@ -159,6 +159,50 @@ describe('AssistantOrchestratorService', () => {
       expect(llm.chat).toHaveBeenCalledTimes(2);
     });
 
+    it('surfaces the created job posting as structured data alongside the reply', async () => {
+      const { orchestrator, llm, toolRegistry } = buildOrchestrator();
+      const createdJob = {
+        id: 'job-1',
+        title: 'Frontend Web Developer',
+        status: 'DRAFT',
+        location: 'Lahore, Pakistan',
+      };
+      llm.chat
+        .mockResolvedValueOnce({
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: 'call-1',
+                type: 'function',
+                function: {
+                  name: 'createJobPosting',
+                  arguments: '{"title":"Frontend Web Developer"}',
+                },
+              },
+            ],
+          },
+          finishReason: 'tool_calls',
+        })
+        .mockResolvedValueOnce({
+          message: {
+            role: 'assistant',
+            content: "I've created a draft for Frontend Web Developer.",
+          },
+          finishReason: 'stop',
+        });
+      toolRegistry.execute.mockResolvedValue({ ok: true, result: createdJob });
+
+      const result = await orchestrator.handleMessage(
+        [],
+        'create a frontend web dev job',
+        'user-1',
+      );
+
+      expect(result.jobPosting).toEqual(createdJob);
+    });
+
     it('short-circuits a gated tool call into a pendingAction instead of executing it', async () => {
       const { orchestrator, llm, toolRegistry, prisma } = buildOrchestrator();
       toolRegistry.isGated.mockReturnValue(true);

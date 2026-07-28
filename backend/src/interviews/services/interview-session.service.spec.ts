@@ -341,13 +341,15 @@ describe('InterviewSessionService', () => {
           }),
         }),
       );
-      // compositeScore = 0.5*80 (match) + 0.5*88 (interview) = 84
+      // compositeScore is the interview's overallScore alone — skillMatchPct
+      // (CV match) is only used pre-interview to decide who gets interviewed,
+      // never blended into the post-interview grade.
       expect(prisma.application.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'app-1' },
           data: expect.objectContaining({
             status: 'IN_REVIEW',
-            compositeScore: 84,
+            compositeScore: 88,
           }),
         }),
       );
@@ -596,6 +598,64 @@ describe('InterviewSessionService', () => {
       const status = await withCompletedSession('REJECTED');
       expect(status.message).toMatch(/not to move forward/i);
       expect(status.candidateStatus).toBe('REJECTED');
+    });
+  });
+
+  describe('logViolation', () => {
+    function mockActiveSession(prisma: ReturnType<typeof buildService>['prisma']) {
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        id: 'app-1',
+        interviewSession: { id: 'session-1', status: 'IN_PROGRESS' },
+      });
+    }
+
+    it('records an eye-tracking violation and stamps warningNumber into its metadata', async () => {
+      const { service, prisma } = buildService();
+      mockActiveSession(prisma);
+      (prisma.interviewViolation.groupBy as jest.Mock)
+        .mockResolvedValueOnce([]) // prior summary: no warnings yet
+        .mockResolvedValueOnce([
+          { type: 'LOOKING_LEFT', _count: { _all: 1 } },
+        ]); // post-create summary
+
+      const result = await service.logViolation('app-1', 'LOOKING_LEFT', {
+        direction: 'LEFT',
+        durationSeconds: 5,
+      });
+
+      expect(prisma.interviewViolation.create).toHaveBeenCalledWith({
+        data: {
+          sessionId: 'session-1',
+          type: 'LOOKING_LEFT',
+          metadataJson: { direction: 'LEFT', durationSeconds: 5, warningNumber: 1 },
+        },
+      });
+      expect(result.total).toBe(1);
+      expect(result.forced).toBe(false);
+    });
+
+    it('force-submits once an eye-tracking violation pushes the total to MAX_INTERVIEW_WARNINGS', async () => {
+      const { service, prisma } = buildService();
+      mockActiveSession(prisma);
+      (prisma.interviewViolation.groupBy as jest.Mock)
+        .mockResolvedValueOnce([{ type: 'TAB_SWITCH', _count: { _all: 4 } }]) // prior: 4 warnings
+        .mockResolvedValueOnce([
+          { type: 'TAB_SWITCH', _count: { _all: 4 } },
+          { type: 'EYES_CLOSED_TOO_LONG', _count: { _all: 1 } },
+        ]); // post-create: 5 warnings
+      const forceSubmit = jest
+        .spyOn(service, 'forceSubmit')
+        .mockResolvedValue({ status: 'COMPLETED', message: 'done' });
+
+      const result = await service.logViolation(
+        'app-1',
+        'EYES_CLOSED_TOO_LONG',
+        { durationSeconds: 5 },
+      );
+
+      expect(forceSubmit).toHaveBeenCalledWith('app-1', 'AUTO_SUBMITTED_VIOLATIONS');
+      expect(result.forced).toBe(true);
+      expect(result.total).toBe(5);
     });
   });
 });

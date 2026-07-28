@@ -9,13 +9,22 @@ import { createPhoneDetector, detectPhone } from "@/lib/monitoring/objectDetecti
 import { registerUnloadBeacon } from "@/lib/monitoring/unloadHandler";
 import { WarningManager } from "@/lib/monitoring/warningManager";
 import { ViolationSummary, ViolationType } from "@/lib/monitoring/violationTypes";
+import { useEyeTracking, EyeTrackingState } from "@/hooks/useEyeTracking";
 
 const FACE_MISSING_MS = 5_000;
 const LOOKING_AWAY_MS = 10_000;
 const LOOKING_AWAY_RADIANS = 0.35; // ~20 degrees — coarse "away from screen" threshold
 const MOBILE_CONSECUTIVE_FRAMES = 3;
 const MULTIPLE_FACES_COOLDOWN_MS = 10_000;
-const FACE_DETECT_INTERVAL_MS = 500; // 2 Hz
+// Originally bumped from 500ms to 80ms (~12Hz) to chase the "10-15 FPS"
+// spec target for eye tracking, but detectForVideo() runs synchronously on
+// the main thread — at that rate it started starving the socket/audio
+// pipeline on real hardware (reports of the 20s answer-submit timeout
+// tripping). 200ms (5Hz) is a large step down from that, but still 10x
+// finer than the 5-second gaze-hold thresholds need, and leaves the main
+// thread free the other 95%+ of the time for everything else the interview
+// page is doing.
+const FACE_DETECT_INTERVAL_MS = 200; // 5 Hz
 const PHONE_DETECT_INTERVAL_MS = 1_000; // 1 Hz
 
 export interface MonitoringToast {
@@ -30,6 +39,9 @@ export interface InterviewMonitoringState {
   dismissToast: () => void;
   forcedSubmission: boolean;
   requestFullscreenAgain: () => void;
+  eyeTracking: EyeTrackingState;
+  /** False until the face/eye detection models have finished loading — lets the UI show "starting up" instead of a misleading "no face detected". */
+  modelsReady: boolean;
 }
 
 /**
@@ -54,6 +66,7 @@ export function useInterviewMonitoring(
   const [fullscreenLost, setFullscreenLost] = useState(false);
   const [toast, setToast] = useState<MonitoringToast | null>(null);
   const [forcedSubmission, setForcedSubmission] = useState(false);
+  const [modelsReady, setModelsReady] = useState(false);
 
   const manager = useMemo(() => new WarningManager(applicationId), [applicationId]);
   const toastIdRef = useRef(0);
@@ -74,6 +87,10 @@ export function useInterviewMonitoring(
     },
     [manager],
   );
+
+  // Same shared `report` (and therefore the same warning counter/cap) as
+  // every other proctoring rule — eye tracking doesn't own its own counter.
+  const eyeTracking = useEyeTracking(report, active);
 
   const dismissToast = useCallback(() => setToast(null), []);
 
@@ -131,6 +148,7 @@ export function useInterviewMonitoring(
   // little gain at 1-2 polls/sec.
   useEffect(() => {
     if (!active || !videoEl) return;
+    setModelsReady(false);
     let cancelled = false;
     let faceInterval: ReturnType<typeof setInterval> | null = null;
     let phoneInterval: ReturnType<typeof setInterval> | null = null;
@@ -159,16 +177,22 @@ export function useInterviewMonitoring(
         }),
       ]);
       if (cancelled) return;
+      setModelsReady(true);
 
       if (landmarker) {
         faceInterval = setInterval(() => {
           if (!videoEl || videoEl.readyState < 2) return;
-          const { faceCount, yaw, pitch } = detectFacePose(
+          const { faceCount, yaw, pitch, landmarks } = detectFacePose(
             landmarker,
             videoEl,
             performance.now(),
           );
           const now = Date.now();
+
+          // Eye tracking rides this same detection pass (no second
+          // detectForVideo() call, no second camera stream) — paused
+          // automatically whenever no face is present (landmarks null).
+          eyeTracking.processFrame(faceCount === 0 ? null : landmarks, now);
 
           if (faceCount === 0) {
             faceMissingSince ??= now;
@@ -244,7 +268,11 @@ export function useInterviewMonitoring(
       if (faceInterval) clearInterval(faceInterval);
       if (phoneInterval) clearInterval(phoneInterval);
     };
-  }, [active, videoEl, report]);
+    // eyeTracking.processFrame is itself memoized on [active, report], both
+    // already deps here — depending on the whole `eyeTracking` object would
+    // re-run this effect (and reload the FaceLandmarker) on every eye-state
+    // change, since useEyeTracking returns a fresh object each render.
+  }, [active, videoEl, report, eyeTracking.processFrame]);
 
   return {
     warningTotal,
@@ -253,5 +281,7 @@ export function useInterviewMonitoring(
     dismissToast,
     forcedSubmission,
     requestFullscreenAgain,
+    eyeTracking: eyeTracking.state,
+    modelsReady,
   };
 }

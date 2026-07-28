@@ -6,6 +6,7 @@ import { io, type Socket } from "socket.io-client";
 import { AudioRecorder } from "@/components/AudioRecorder";
 import { CircularVoiceVisualizer } from "@/components/CircularVoiceVisualizer";
 import { CameraPreview } from "@/components/interview/CameraPreview";
+import { EyeTrackingBadge } from "@/components/interview/EyeTrackingBadge";
 import { MonitoringStatusBadge } from "@/components/interview/MonitoringStatusBadge";
 import { WarningToast } from "@/components/interview/WarningToast";
 import { useInterviewMonitoring } from "@/hooks/useInterviewMonitoring";
@@ -226,6 +227,7 @@ export default function InterviewPage() {
         <span>{connected ? "Connected" : "Connecting…"}</span>
         <div className="flex items-center gap-3">
           {question && <span>Question {question.sequenceOrder}</span>}
+          <EyeTrackingBadge state={monitoring.eyeTracking} modelsReady={monitoring.modelsReady} />
           <MonitoringStatusBadge warningTotal={monitoring.warningTotal} />
         </div>
       </div>

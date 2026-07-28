@@ -9,7 +9,13 @@ export type ViolationType =
   | "CAMERA_DISABLED"
   | "MICROPHONE_DISABLED"
   | "BROWSER_CLOSED"
-  | "SHORTCUT_ATTEMPTED";
+  | "SHORTCUT_ATTEMPTED"
+  | "LOOKING_LEFT"
+  | "LOOKING_RIGHT"
+  | "LOOKING_DOWN"
+  | "LOOKING_UP"
+  | "EYES_CLOSED_TOO_LONG"
+  | "RAPID_GAZE_SWITCHING";
 
 export type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 
@@ -37,4 +43,10 @@ export const VIOLATION_MESSAGES: Record<ViolationType, string> = {
   MICROPHONE_DISABLED: "Microphone access was lost. Please reconnect your microphone.",
   BROWSER_CLOSED: "Interview session ended.",
   SHORTCUT_ATTEMPTED: "That keyboard shortcut is disabled during the interview.",
+  LOOKING_LEFT: "Please keep your eyes on the interview.",
+  LOOKING_RIGHT: "Please keep your eyes on the interview.",
+  LOOKING_DOWN: "Looking away from the interview for too long.",
+  LOOKING_UP: "Please avoid looking at another screen or monitor.",
+  EYES_CLOSED_TOO_LONG: "Please keep your eyes open during the interview.",
+  RAPID_GAZE_SWITCHING: "Please stop looking back and forth and focus on the interview.",
 };

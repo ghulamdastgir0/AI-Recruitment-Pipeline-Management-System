@@ -12,7 +12,6 @@ import { GroqAudioService } from '../../shared/audio/groq-audio.service';
 import { CandidateStatus, toCandidateStatus } from '../candidate-status.util';
 import {
   BASE_QUESTION_COUNT,
-  COMPOSITE_SCORE_WEIGHTS,
   MAX_FOLLOWUPS,
   MAX_TOTAL_QUESTIONS,
 } from '../interview.constants';
@@ -34,7 +33,13 @@ export type ViolationType =
   | 'CAMERA_DISABLED'
   | 'MICROPHONE_DISABLED'
   | 'BROWSER_CLOSED'
-  | 'SHORTCUT_ATTEMPTED';
+  | 'SHORTCUT_ATTEMPTED'
+  | 'LOOKING_LEFT'
+  | 'LOOKING_RIGHT'
+  | 'LOOKING_DOWN'
+  | 'LOOKING_UP'
+  | 'EYES_CLOSED_TOO_LONG'
+  | 'RAPID_GAZE_SWITCHING';
 
 export interface ViolationSummary {
   counts: Partial<Record<ViolationType, number>>;
@@ -516,11 +521,18 @@ export class InterviewSessionService {
     }
     const session = application.interviewSession;
 
+    // warningNumber is this event's 1-indexed position in the running total
+    // (computed from the summary *before* this row exists), stamped into the
+    // stored metadata so the audit trail records which warning number each
+    // violation was without a second write.
+    const priorSummary = await this.getViolationSummaryBySessionId(session.id);
+    const warningNumber = priorSummary.total + 1;
+
     await this.prisma.interviewViolation.create({
       data: {
         sessionId: session.id,
         type,
-        metadataJson: metadata === undefined ? undefined : (metadata as object),
+        metadataJson: { ...metadata, warningNumber } as object,
       },
     });
 
@@ -651,20 +663,14 @@ export class InterviewSessionService {
       },
     });
 
-    const matchPct = application.skillMatchPct
-      ? Number(application.skillMatchPct)
-      : null;
-    const compositeScore =
-      matchPct !== null
-        ? round(
-            COMPOSITE_SCORE_WEIGHTS.match * matchPct +
-              COMPOSITE_SCORE_WEIGHTS.interview * grade.overallScore,
-          )
-        : grade.overallScore;
-
+    // The CV-match score (skillMatchPct) is only ever used pre-interview, to
+    // decide whether a candidate is worth interviewing at all — it's never
+    // blended into the post-interview grade. Once the interview happens, its
+    // transcript is the only evidence of actual proficiency, so the
+    // candidate's final score is the interview's overallScore alone.
     await this.prisma.application.update({
       where: { id: applicationId },
-      data: { compositeScore, status: 'IN_REVIEW' },
+      data: { compositeScore: grade.overallScore, status: 'IN_REVIEW' },
     });
 
     return {
@@ -809,8 +815,4 @@ function groupBySkill(
     });
   }
   return [...map.values()];
-}
-
-function round(value: number): number {
-  return Math.round(value * 100) / 100;
 }

@@ -6,7 +6,10 @@ import {
 } from '@nestjs/common';
 import { AuditLogService } from '../audit/audit-log.service';
 import { UploadedCv } from '../candidates/services/cv-upload.service';
-import { JobPostingsService } from '../job-postings/job-postings.service';
+import {
+  JobPostingsService,
+  JobPostingWithSkills,
+} from '../job-postings/job-postings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { LlmClientService } from '../shared/llm/llm-client.service';
 import { ChatMessage } from '../shared/llm/llm-client.types';
@@ -29,7 +32,11 @@ export interface PendingActionPreview {
 export interface AssistantReply {
   reply: string;
   pendingAction?: PendingActionPreview;
+  /** Set whenever this turn created/updated a job posting, so the UI can render a structured card instead of relying on the LLM's free-text paraphrase. */
+  jobPosting?: JobPostingWithSkills;
 }
+
+const JOB_POSTING_RESULT_TOOLS = new Set(['createJobPosting', 'updateJobPosting']);
 
 const MAX_TOOL_ITERATIONS = 5;
 const PENDING_ACTION_TTL_MINUTES = 30;
@@ -85,6 +92,11 @@ export class AssistantOrchestratorService {
         .join('\n'),
     );
 
+    // The LLM only ever sees this job as JSON in a tool result and paraphrases
+    // it back in prose — tracked separately here so the frontend can render
+    // an actual structured job card instead of relying on that paraphrase.
+    let lastJobPosting: JobPostingWithSkills | undefined;
+
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       let message: ChatMessage;
       try {
@@ -96,7 +108,7 @@ export class AssistantOrchestratorService {
       }
 
       if (!message.tool_calls || message.tool_calls.length === 0) {
-        return { reply: message.content ?? '' };
+        return { reply: message.content ?? '', jobPosting: lastJobPosting };
       }
 
       messages.push(message);
@@ -122,6 +134,7 @@ export class AssistantOrchestratorService {
               args,
               expiresAt: pending.expiresAt,
             },
+            jobPosting: lastJobPosting,
           };
         }
 
@@ -136,6 +149,10 @@ export class AssistantOrchestratorService {
                 : undefined,
           },
         );
+
+        if (outcome.ok && JOB_POSTING_RESULT_TOOLS.has(toolCall.function.name)) {
+          lastJobPosting = outcome.result as JobPostingWithSkills;
+        }
 
         messages.push({
           role: 'tool',
@@ -212,8 +229,12 @@ export class AssistantOrchestratorService {
     });
 
     const description = await this.describeAction(action.tool, args);
+    const jobPosting =
+      outcome.ok && JOB_POSTING_RESULT_TOOLS.has(action.tool)
+        ? (outcome.result as JobPostingWithSkills)
+        : undefined;
     return outcome.ok
-      ? { reply: `Done — ${description} completed.` }
+      ? { reply: `Done — ${description} completed.`, jobPosting }
       : {
           reply: `That failed: ${(outcome.result as { error?: string }).error ?? 'unknown error'}`,
         };

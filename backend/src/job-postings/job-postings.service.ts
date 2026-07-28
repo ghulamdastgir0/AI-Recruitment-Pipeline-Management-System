@@ -27,7 +27,7 @@ const IN_FLIGHT_APPLICATION_STATUSES: AppStatus[] = [
   'MANAGER_REVIEWED',
 ];
 
-// How long a same-actor/same-rawPrompt DRAFT is treated as "still the same
+// How long a same-actor/same-title DRAFT is treated as "still the same
 // in-progress assistant conversation" for create()'s duplicate-draft guard —
 // generous enough to cover a multi-message back-and-forth without merging
 // two genuinely separate later requests that happen to reuse identical
@@ -99,12 +99,18 @@ export class JobPostingsService {
     // them all before calling the tool once, each answer can trigger another
     // full createJobPosting call. Without this guard, that produces one
     // duplicate DRAFT Job row per follow-up message instead of one job with
-    // its details filled in incrementally. Same actor + identical rawPrompt
-    // (the assistant is instructed to pass HR's original request verbatim
-    // every time) + still a DRAFT + recent = treated as the same in-progress
-    // request and updated in place rather than inserted again.
+    // its details filled in incrementally. Same actor + same (trimmed,
+    // case-insensitive) title + still a DRAFT + recent = treated as the same
+    // in-progress request and updated in place rather than inserted again.
+    // Previously matched on exact rawPrompt text instead of title, but the
+    // assistant regenerates that "verbatim" text itself on every call rather
+    // than replaying a stored string, so it routinely comes back
+    // byte-different between calls (e.g. "Lahore, Pakistan" vs "Lahore
+    // Pakistan") and the guard never actually matched. Title is what HR
+    // actually asked for and is far more stable across the same
+    // conversation.
     const duplicate = await this.findRecentDuplicateDraft(
-      dto.rawPrompt,
+      dto.title,
       createdByUserId,
     );
     if (duplicate) {
@@ -167,14 +173,14 @@ export class JobPostingsService {
   }
 
   private async findRecentDuplicateDraft(
-    rawPrompt: string,
+    title: string,
     createdByUserId: string,
   ) {
     const cutoff = new Date(Date.now() - DUPLICATE_DRAFT_WINDOW_MS);
     return this.prisma.job.findFirst({
       where: {
         createdByUserId,
-        rawPrompt,
+        title: { equals: title.trim(), mode: 'insensitive' },
         status: 'DRAFT',
         createdAt: { gte: cutoff },
       },

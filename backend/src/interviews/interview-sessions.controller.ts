@@ -45,6 +45,12 @@ const VIOLATION_TYPES: ViolationType[] = [
   'MICROPHONE_DISABLED',
   'BROWSER_CLOSED',
   'SHORTCUT_ATTEMPTED',
+  'LOOKING_LEFT',
+  'LOOKING_RIGHT',
+  'LOOKING_DOWN',
+  'LOOKING_UP',
+  'EYES_CLOSED_TOO_LONG',
+  'RAPID_GAZE_SWITCHING',
 ];
 
 // The global ValidationPipe runs with { whitelist: true, forbidNonWhitelisted:
