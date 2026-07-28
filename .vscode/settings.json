@@ -1,0 +1,12 @@
+{
+  // @tensorflow-models/coco-ssd ships a tsconfig.json that extends a
+  // workspace-relative "../tsconfig" which doesn't exist in the published
+  // npm package — VS Code's TS server treats it as an orphan project and
+  // reports "No inputs were found"/"File not found" for it. Our own
+  // tsconfig.json already excludes node_modules (frontend/tsconfig.json),
+  // so this is purely a phantom-project diagnostic, not a real project
+  // error — disabling background whole-project diagnostics stops it from
+  // surfacing without touching (and losing on next `npm install`) anything
+  // inside node_modules.
+  "typescript.tsserver.experimental.enableProjectDiagnostics": false
+}

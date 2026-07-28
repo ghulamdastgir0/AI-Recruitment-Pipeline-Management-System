@@ -1,6 +1,8 @@
+import { Logger } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
+  OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
 } from '@nestjs/websockets';
@@ -68,7 +70,8 @@ class SlidingWindowLimiter {
   // the old manual stop-button flow did, so give it real headroom.
   maxHttpBufferSize: 10 * 1024 * 1024,
 })
-export class InterviewGateway {
+export class InterviewGateway implements OnGatewayDisconnect {
+  private readonly logger = new Logger(InterviewGateway.name);
   private readonly joinLimiter = new SlidingWindowLimiter(
     JOIN_LIMIT.max,
     JOIN_LIMIT.windowMs,
@@ -93,9 +96,47 @@ export class InterviewGateway {
     }
     try {
       const turn = await this.sessions.start(body.applicationId);
+      // Remembered so a later disconnect (refresh, tab close, network
+      // loss) knows which session to force-submit — see handleDisconnect.
+      (client.data as { applicationId?: string }).applicationId =
+        body.applicationId;
       client.emit('question', turn);
     } catch (error) {
       client.emit('error', { message: errorMessage(error) });
+    }
+  }
+
+  /**
+   * Ends the interview the instant the live connection drops, for any
+   * reason — refresh, tab close, or network loss — rather than relying
+   * solely on the client-side sendBeacon (unloadHandler.ts). A refresh
+   * tears down this socket and opens a brand-new one fast enough that the
+   * beacon's separate HTTP POST can race it: the refreshed page could
+   * rejoin the still-"IN_PROGRESS" session before the beacon's
+   * BROWSER_CLOSED report is even processed. This handler runs synchronously
+   * with the disconnect itself, so there's no race — once the connection is
+   * gone, the interview is over. Deliberately no reconnect grace period: a
+   * dropped connection (of any cause) always ends the interview, which is
+   * the whole point of "refreshing must submit". forceSubmit() is a no-op
+   * if the session already finished, so this is always safe to call, and
+   * still lands alongside whatever the beacon separately reports (which
+   * additionally records the BROWSER_CLOSED violation row for the audit
+   * trail — this handler only forces completion, it doesn't log a
+   * violation itself).
+   */
+  async handleDisconnect(client: Socket): Promise<void> {
+    const applicationId = (client.data as { applicationId?: string })
+      .applicationId;
+    if (!applicationId) return;
+    try {
+      await this.sessions.forceSubmit(
+        applicationId,
+        'AUTO_SUBMITTED_BROWSER_CLOSED',
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to force-submit application ${applicationId} on disconnect: ${errorMessage(error)}`,
+      );
     }
   }
 

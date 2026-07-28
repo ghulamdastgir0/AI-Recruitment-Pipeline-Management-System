@@ -95,7 +95,7 @@ export function useInterviewMonitoring(
   const dismissToast = useCallback(() => setToast(null), []);
 
   const requestFullscreenAgain = useCallback(() => {
-    void enterFullscreen().then((ok) => {
+    enterFullscreen().then((ok) => {
       if (ok) setFullscreenLost(false);
     });
   }, []);
@@ -128,7 +128,7 @@ export function useInterviewMonitoring(
 
   useEffect(() => {
     if (!active) return;
-    void enterFullscreen();
+    enterFullscreen();
     return startFullscreenMonitor(() => {
       setFullscreenLost(true);
       void report("FULLSCREEN_EXIT");
@@ -231,34 +231,41 @@ export function useInterviewMonitoring(
 
       if (phoneDetector) {
         let phoneCheckInFlight = false;
+
+        // async/await instead of a .then/.catch/.finally chain here — that
+        // chain nested 3 more function levels inside this IIFE's setInterval
+        // callback (already 4 deep), tripping a max-nesting-depth lint rule
+        // for no functional reason; a linear await body doesn't add any.
+        const runPhoneCheck = async () => {
+          phoneCheckInFlight = true;
+          try {
+            const seen = await detectPhone(phoneDetector, videoEl);
+            if (seen) {
+              consecutivePhoneFrames += 1;
+              if (
+                !phoneEpisodeFired &&
+                consecutivePhoneFrames >= MOBILE_CONSECUTIVE_FRAMES
+              ) {
+                phoneEpisodeFired = true;
+                void report("MOBILE_DETECTED");
+              }
+            } else {
+              consecutivePhoneFrames = 0;
+              phoneEpisodeFired = false;
+            }
+          } catch (err) {
+            console.error("[interview-monitoring] Phone detection tick failed", err);
+          } finally {
+            phoneCheckInFlight = false;
+          }
+        };
+
         phoneInterval = setInterval(() => {
           // Guards against overlapping calls if one inference runs long —
           // without this, a slow tick could pile up concurrent detect()
           // calls faster than they resolve.
           if (phoneCheckInFlight || !videoEl || videoEl.readyState < 2) return;
-          phoneCheckInFlight = true;
-          detectPhone(phoneDetector, videoEl)
-            .then((seen) => {
-              if (seen) {
-                consecutivePhoneFrames += 1;
-                if (
-                  !phoneEpisodeFired &&
-                  consecutivePhoneFrames >= MOBILE_CONSECUTIVE_FRAMES
-                ) {
-                  phoneEpisodeFired = true;
-                  void report("MOBILE_DETECTED");
-                }
-              } else {
-                consecutivePhoneFrames = 0;
-                phoneEpisodeFired = false;
-              }
-            })
-            .catch((err: unknown) => {
-              console.error("[interview-monitoring] Phone detection tick failed", err);
-            })
-            .finally(() => {
-              phoneCheckInFlight = false;
-            });
+          void runPhoneCheck();
         }, PHONE_DETECT_INTERVAL_MS);
       }
     })();

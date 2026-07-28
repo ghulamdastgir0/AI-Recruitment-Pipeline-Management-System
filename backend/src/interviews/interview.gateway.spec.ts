@@ -7,8 +7,14 @@ function buildGateway() {
   const sessions = {
     start: jest.fn(),
     answer: jest.fn(),
+    forceSubmit: jest.fn(),
   } as unknown as jest.Mocked<InterviewSessionService>;
-  const client = { emit: jest.fn() } as unknown as jest.Mocked<Socket>;
+  // Real Socket.IO sockets always carry a `.data` object (this is where
+  // handleJoin stashes applicationId for handleDisconnect to read later).
+  const client = {
+    emit: jest.fn(),
+    data: {},
+  } as unknown as jest.Mocked<Socket>;
 
   return { gateway: new InterviewGateway(sessions), sessions, client };
 }
@@ -42,6 +48,63 @@ describe('InterviewGateway', () => {
       expect(client.emit).toHaveBeenCalledWith('error', {
         message: 'No interview scheduled.',
       });
+    });
+
+    it('remembers the applicationId on the socket so a later disconnect can force-submit it', async () => {
+      const { gateway, sessions, client } = buildGateway();
+      sessions.start.mockResolvedValue({
+        questionId: 'q-1',
+        sequenceOrder: 1,
+        questionText: 'Q1',
+        questionAudioUrl: '/interview-sessions/questions/q-1/audio',
+      });
+
+      await gateway.handleJoin({ applicationId: 'app-1' }, client);
+
+      expect(client.data.applicationId).toBe('app-1');
+    });
+
+    it('does not remember the applicationId when start() fails', async () => {
+      const { gateway, sessions, client } = buildGateway();
+      sessions.start.mockRejectedValue(new Error('No interview scheduled.'));
+
+      await gateway.handleJoin({ applicationId: 'app-1' }, client);
+
+      expect(client.data.applicationId).toBeUndefined();
+    });
+  });
+
+  describe('disconnect', () => {
+    it('force-submits the joined application, treating any disconnect (refresh, close, network loss) as ending the interview', async () => {
+      const { gateway, sessions, client } = buildGateway();
+      client.data.applicationId = 'app-1';
+      sessions.forceSubmit.mockResolvedValue({
+        status: 'COMPLETED',
+        message: 'done',
+      });
+
+      await gateway.handleDisconnect(client);
+
+      expect(sessions.forceSubmit).toHaveBeenCalledWith(
+        'app-1',
+        'AUTO_SUBMITTED_BROWSER_CLOSED',
+      );
+    });
+
+    it('does nothing if the socket never successfully joined an interview', async () => {
+      const { gateway, sessions, client } = buildGateway();
+
+      await gateway.handleDisconnect(client);
+
+      expect(sessions.forceSubmit).not.toHaveBeenCalled();
+    });
+
+    it('swallows a forceSubmit failure instead of throwing back into socket.io', async () => {
+      const { gateway, sessions, client } = buildGateway();
+      client.data.applicationId = 'app-1';
+      sessions.forceSubmit.mockRejectedValue(new Error('db unavailable'));
+
+      await expect(gateway.handleDisconnect(client)).resolves.toBeUndefined();
     });
   });
 
