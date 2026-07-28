@@ -36,7 +36,11 @@ function jobRow(
 }
 
 function buildService(
-  options: { jobStatus?: string; hiredCount?: number; hiringTarget?: number } = {},
+  options: {
+    jobStatus?: string;
+    hiredCount?: number;
+    hiringTarget?: number;
+  } = {},
 ) {
   const prisma = {
     job: {
@@ -49,6 +53,10 @@ function buildService(
       create: jest
         .fn()
         .mockResolvedValue(jobRow({ status: options.jobStatus })),
+      // No duplicate in-progress draft by default — create()'s
+      // duplicate-draft guard (see job-postings.service.ts) falls through to
+      // a normal insert unless a test explicitly mocks this to return one.
+      findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
       update: jest.fn().mockResolvedValue(
         jobRow({
@@ -288,11 +296,17 @@ describe('JobPostingsService.close/archive — auto-close-at-target (finding #17
       data: { status: 'REJECTED' },
     });
     expect(email.send).toHaveBeenCalledWith(
-      expect.objectContaining({ to: 'jane@example.com', type: 'BULK_REJECTION' }),
+      expect.objectContaining({
+        to: 'jane@example.com',
+        type: 'BULK_REJECTION',
+      }),
     );
     expect(prisma.emailLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ applicationId: 'app-1', type: 'BULK_REJECTION' }),
+        data: expect.objectContaining({
+          applicationId: 'app-1',
+          type: 'BULK_REJECTION',
+        }),
       }),
     );
   });
@@ -483,6 +497,88 @@ describe('JobPostingsService.create — candidate-safe summary drafting', () => 
     );
 
     expect(llm.chat).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('JobPostingsService.create — duplicate-draft guard', () => {
+  const rawPrompt = 'Hire a backend engineer';
+
+  it('updates the existing DRAFT instead of inserting a new row when the assistant re-calls createJobPosting with the same rawPrompt', async () => {
+    const { service, prisma, llm } = buildService();
+    (prisma.job.findFirst as jest.Mock).mockResolvedValue(
+      jobRow({ id: 'job-existing' }),
+    );
+    llm.chat.mockResolvedValue({
+      message: {
+        role: 'assistant',
+        content: JSON.stringify({
+          description: 'Updated description with location.',
+          candidateSummary: 'Updated blurb.',
+        }),
+      },
+      finishReason: 'stop',
+    });
+
+    const result = await service.create(
+      {
+        title: 'Backend Engineer',
+        rawPrompt,
+        experienceMin: 2,
+        hiringTarget: 1,
+        deadline: new Date().toISOString(),
+        location: 'Lahore',
+      },
+      'user-1',
+    );
+
+    expect(prisma.job.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          createdByUserId: 'user-1',
+          rawPrompt,
+          status: 'DRAFT',
+        }),
+      }),
+    );
+    expect(prisma.job.create).not.toHaveBeenCalled();
+    expect(prisma.job.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'job-existing' },
+        data: expect.objectContaining({
+          location: 'Lahore',
+          description: 'Updated description with location.',
+        }),
+      }),
+    );
+    expect(result).toBeDefined();
+  });
+
+  it('inserts normally when no recent matching DRAFT exists', async () => {
+    const { service, prisma, llm } = buildService();
+    llm.chat.mockResolvedValue({
+      message: {
+        role: 'assistant',
+        content: JSON.stringify({
+          description: 'Full internal description.',
+          candidateSummary: 'Short blurb.',
+        }),
+      },
+      finishReason: 'stop',
+    });
+
+    await service.create(
+      {
+        title: 'Backend Engineer',
+        rawPrompt,
+        experienceMin: 2,
+        hiringTarget: 1,
+        deadline: new Date().toISOString(),
+      },
+      'user-1',
+    );
+
+    expect(prisma.job.create).toHaveBeenCalledTimes(1);
+    expect(prisma.job.update).not.toHaveBeenCalled();
   });
 });
 

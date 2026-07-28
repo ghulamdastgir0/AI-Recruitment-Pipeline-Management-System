@@ -1,13 +1,20 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { io, type Socket } from "socket.io-client";
 import { AudioRecorder } from "@/components/AudioRecorder";
-import { VoiceVisualizer } from "@/components/VoiceVisualizer";
+import { CircularVoiceVisualizer } from "@/components/CircularVoiceVisualizer";
+import { CameraPreview } from "@/components/interview/CameraPreview";
+import { MonitoringStatusBadge } from "@/components/interview/MonitoringStatusBadge";
+import { WarningToast } from "@/components/interview/WarningToast";
+import { useInterviewMonitoring } from "@/hooks/useInterviewMonitoring";
 import { API_BASE_URL, apiFileUrl } from "@/lib/api";
+import { requestCameraAndMic } from "@/lib/monitoring/cameraService";
 
 const ANSWER_TIMEOUT_MS = 20_000;
+const FORCED_SUBMISSION_MESSAGE =
+  "You have exceeded the maximum allowed warnings. Your interview has been submitted automatically.";
 
 interface TurnView {
   questionId: string;
@@ -33,19 +40,33 @@ export default function InterviewPage() {
 
   const [started, setStarted] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
+  const [audioOnlyStream, setAudioOnlyStream] = useState<MediaStream | null>(
+    null,
+  );
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
   const [connected, setConnected] = useState(false);
   const [question, setQuestion] = useState<TurnView | null>(null);
   const [result, setResult] = useState<ResultView | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [micError, setMicError] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [microphoneError, setMicrophoneError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [listening, setListening] = useState(false);
   const [stalled, setStalled] = useState(false);
+
+  const monitoring = useInterviewMonitoring(applicationId, videoEl, started);
 
   function clearAnswerTimeout() {
     if (answerTimeoutRef.current) {
       clearTimeout(answerTimeoutRef.current);
       answerTimeoutRef.current = null;
+    }
+  }
+
+  function stopMedia() {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
     }
   }
 
@@ -90,21 +111,40 @@ export default function InterviewPage() {
   }
 
   async function startInterview() {
-    setMicError(null);
-    try {
-      const micStream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-      });
-      streamRef.current = micStream;
-      setStream(micStream);
-    } catch {
-      setMicError(
-        "Could not access the microphone. Check your browser's permission prompt and try again.",
-      );
+    setCameraError(null);
+    setMicrophoneError(null);
+    const media = await requestCameraAndMic();
+    if (!media.stream) {
+      setCameraError(media.cameraError ?? null);
+      setMicrophoneError(media.microphoneError ?? null);
       return;
     }
+    streamRef.current = media.stream;
+    setStream(media.stream);
+    setAudioOnlyStream(new MediaStream(media.stream.getAudioTracks()));
     setStarted(true);
   }
+
+  const handleVideoReady = useCallback((video: HTMLVideoElement | null) => {
+    setVideoEl(video);
+  }, []);
+
+  // Forced early submission (5-warning cap) — stop everything and show the
+  // same terminal card a natural completion shows, with a different
+  // message. Deferred: effects must not call setState synchronously in
+  // their own body — a microtask moves it just outside that window (same
+  // pattern as AudioRecorder.tsx).
+  useEffect(() => {
+    if (!monitoring.forcedSubmission) return;
+    clearAnswerTimeout();
+    socketRef.current?.disconnect();
+    stopMedia();
+    queueMicrotask(() => {
+      setSubmitting(false);
+      setListening(false);
+      setResult({ status: "COMPLETED", message: FORCED_SUBMISSION_MESSAGE });
+    });
+  }, [monitoring.forcedSubmission]);
 
   useEffect(() => {
     if (!started) return;
@@ -131,7 +171,7 @@ export default function InterviewPage() {
       setResult(finalResult);
       setSubmitting(false);
       setListening(false);
-      streamRef.current?.getTracks().forEach((track) => track.stop());
+      stopMedia();
     });
     socket.on("error", (payload: { message: string }) => {
       clearAnswerTimeout();
@@ -143,7 +183,7 @@ export default function InterviewPage() {
     return () => {
       clearAnswerTimeout();
       socket.disconnect();
-      streamRef.current?.getTracks().forEach((track) => track.stop());
+      stopMedia();
     };
   }, [started, applicationId]);
 
@@ -160,7 +200,15 @@ export default function InterviewPage() {
             seconds, your answer is submitted automatically and the next
             question follows. No buttons to press.
           </p>
-          {micError && <p className="text-sm text-red-400">{micError}</p>}
+          <p className="text-xs text-gray-500">
+            This interview is proctored: your camera stays on, the tab must
+            stay in focus and fullscreen, and the session ends automatically
+            after repeated warnings.
+          </p>
+          {cameraError && <p className="text-sm text-red-400">{cameraError}</p>}
+          {microphoneError && (
+            <p className="text-sm text-red-400">{microphoneError}</p>
+          )}
           <button
             onClick={() => void startInterview()}
             className="self-start rounded-full bg-brand-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-brand-500"
@@ -176,13 +224,38 @@ export default function InterviewPage() {
     <main className="flex min-h-screen flex-col bg-gray-950 text-white">
       <div className="flex items-center justify-between px-6 py-4 text-sm text-gray-400">
         <span>{connected ? "Connected" : "Connecting…"}</span>
-        {question && <span>Question {question.sequenceOrder}</span>}
+        <div className="flex items-center gap-3">
+          {question && <span>Question {question.sequenceOrder}</span>}
+          <MonitoringStatusBadge warningTotal={monitoring.warningTotal} />
+        </div>
       </div>
 
       {error && (
         <p className="mx-6 rounded-lg border border-red-800 bg-red-950 p-3 text-sm text-red-300">
           {error}
         </p>
+      )}
+
+      {monitoring.fullscreenLost && !result && (
+        <div className="mx-6 flex items-center justify-between rounded-lg border border-amber-800 bg-amber-950 p-3">
+          <p className="text-sm text-amber-300">
+            Please return to fullscreen to continue your interview.
+          </p>
+          <button
+            onClick={monitoring.requestFullscreenAgain}
+            className="rounded bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-500"
+          >
+            Return to fullscreen
+          </button>
+        </div>
+      )}
+
+      {monitoring.toast && (
+        <WarningToast
+          key={monitoring.toast.id}
+          message={monitoring.toast.message}
+          onDismiss={monitoring.dismissToast}
+        />
       )}
 
       <div className="flex flex-1 flex-col items-center justify-center gap-8 px-6 pb-24">
@@ -201,21 +274,7 @@ export default function InterviewPage() {
           </div>
         ) : question ? (
           <>
-            <div
-              className={`flex h-40 w-40 items-center justify-center rounded-full border transition-colors duration-500 ${
-                listening
-                  ? "border-brand-500 bg-brand-500/10"
-                  : "border-gray-700 bg-gray-900"
-              }`}
-            >
-              <div
-                className={`h-24 w-24 rounded-full transition-all duration-500 ${
-                  listening ? "bg-brand-500/30" : "bg-gray-800"
-                }`}
-              />
-            </div>
-
-            <VoiceVisualizer stream={stream} active={listening} />
+            <CircularVoiceVisualizer stream={stream} active={listening} />
 
             <p className="max-w-xl text-center text-lg text-gray-100">
               {question.questionText}
@@ -231,7 +290,7 @@ export default function InterviewPage() {
 
             <div className="w-full max-w-md">
               <AudioRecorder
-                stream={stream}
+                stream={audioOnlyStream}
                 active={listening}
                 onAutoSubmit={sendAnswer}
               />
@@ -257,11 +316,15 @@ export default function InterviewPage() {
           </>
         ) : (
           <>
-            <VoiceVisualizer stream={stream} active={false} />
+            <CircularVoiceVisualizer stream={stream} active={false} />
             <p className="text-gray-400">Waiting for the first question…</p>
           </>
         )}
       </div>
+
+      {!result && (
+        <CameraPreview stream={stream} onVideoReady={handleVideoReady} />
+      )}
     </main>
   );
 }

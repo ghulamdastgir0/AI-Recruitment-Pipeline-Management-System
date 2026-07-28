@@ -16,11 +16,36 @@ import {
   MAX_FOLLOWUPS,
   MAX_TOTAL_QUESTIONS,
 } from '../interview.constants';
+import { MAX_INTERVIEW_WARNINGS, riskLevelFor } from '../violation.util';
 import {
   InterviewOrchestratorService,
   NextTurnResult,
   SkillEvidenceGroup,
 } from './interview-orchestrator.service';
+
+export type ViolationType =
+  | 'FACE_MISSING'
+  | 'MULTIPLE_FACES'
+  | 'LOOKING_AWAY'
+  | 'MOBILE_DETECTED'
+  | 'TAB_SWITCH'
+  | 'FULLSCREEN_EXIT'
+  | 'WINDOW_BLUR'
+  | 'CAMERA_DISABLED'
+  | 'MICROPHONE_DISABLED'
+  | 'BROWSER_CLOSED'
+  | 'SHORTCUT_ATTEMPTED';
+
+export interface ViolationSummary {
+  counts: Partial<Record<ViolationType, number>>;
+  total: number;
+  riskLevel: ReturnType<typeof riskLevelFor>;
+}
+
+export interface LogViolationResult extends ViolationSummary {
+  /** True if this report pushed the session into an early forced completion. */
+  forced: boolean;
+}
 
 export interface UploadedAudio {
   buffer: Buffer;
@@ -59,6 +84,8 @@ export interface InterviewStatusView {
   result?: InterviewResultView;
   /** CV processing failed permanently — nothing will change without a fresh upload; lets pollers stop. */
   terminal?: boolean;
+  /** Only present once an AIInterviewSession exists — lets the frontend rehydrate its warning count after a refresh. */
+  violations?: ViolationSummary;
 }
 
 export interface TranscriptQuestionView {
@@ -81,8 +108,11 @@ export interface InterviewTranscriptView {
   summary: string | null;
   startedAt: Date | null;
   completedAt: Date | null;
+  /** Set only if this session was auto-submitted early by the proctoring system rather than completed naturally. */
+  terminationReason: string | null;
   questions: TranscriptQuestionView[];
   skillGrades: SkillResultView[];
+  violations: ViolationSummary;
 }
 
 const invitePlainMessage = (deadline: Date): string =>
@@ -347,12 +377,14 @@ export class InterviewSessionService {
     }
 
     const session = application.interviewSession;
+    const violations = await this.getViolationSummaryBySessionId(session.id);
     if (await this.expireIfNeeded(session, applicationId)) {
       return {
         applicationStatus: 'INTERVIEW_EXPIRED',
         candidateStatus: toCandidateStatus('INTERVIEW_EXPIRED'),
         message:
           'The window to complete your technical interview has expired. Please contact us if you believe this is a mistake.',
+        violations,
       };
     }
 
@@ -363,6 +395,7 @@ export class InterviewSessionService {
           candidateStatus: toCandidateStatus(application.status),
           message: invitePlainMessage(session.windowExpiresAt),
           interviewDeadline: session.windowExpiresAt,
+          violations,
         };
       case 'IN_PROGRESS': {
         const pending = session.questions.find((q) => !q.answeredAt);
@@ -371,6 +404,7 @@ export class InterviewSessionService {
           candidateStatus: toCandidateStatus(application.status),
           message: 'Your technical interview is in progress.',
           currentQuestion: pending ? this.toTurnView(pending) : undefined,
+          violations,
         };
       }
       case 'COMPLETED':
@@ -379,12 +413,14 @@ export class InterviewSessionService {
           candidateStatus: toCandidateStatus(application.status),
           message: postInterviewMessage(application.status),
           result: { status: 'COMPLETED', message: interviewSubmittedMessage },
+          violations,
         };
       default:
         return {
           applicationStatus: application.status,
           candidateStatus: toCandidateStatus(application.status),
           message: 'This interview is no longer active.',
+          violations,
         };
     }
   }
@@ -424,6 +460,8 @@ export class InterviewSessionService {
       summary: session.summary,
       startedAt: session.startedAt,
       completedAt: session.completedAt,
+      terminationReason: session.terminationReason,
+      violations: await this.getViolationSummaryBySessionId(session.id),
       questions: session.questions.map((q) => ({
         sequenceOrder: q.sequenceOrder,
         questionText: q.questionText,
@@ -454,6 +492,109 @@ export class InterviewSessionService {
     return this.storage.read(question.questionAudioUrl);
   }
 
+  /**
+   * Reports one proctoring irregularity for the given application's live
+   * interview session. A BROWSER_CLOSED report always force-completes the
+   * session immediately (there's no one left to see further warnings); any
+   * other type force-completes once the running total reaches
+   * MAX_INTERVIEW_WARNINGS. Always records the row first, even if the
+   * session has already finished, so the audit trail stays complete.
+   */
+  async logViolation(
+    applicationId: string,
+    type: ViolationType,
+    metadata?: Record<string, unknown>,
+  ): Promise<LogViolationResult> {
+    const application = await this.prisma.application.findUnique({
+      where: { id: applicationId },
+      include: { interviewSession: true },
+    });
+    if (!application?.interviewSession) {
+      throw new NotFoundException(
+        'No interview has been scheduled for this application.',
+      );
+    }
+    const session = application.interviewSession;
+
+    await this.prisma.interviewViolation.create({
+      data: {
+        sessionId: session.id,
+        type,
+        metadataJson: metadata === undefined ? undefined : (metadata as object),
+      },
+    });
+
+    const summary = await this.getViolationSummaryBySessionId(session.id);
+    const sessionStillActive =
+      session.status === 'PENDING' || session.status === 'IN_PROGRESS';
+
+    let forced = false;
+    if (sessionStillActive && type === 'BROWSER_CLOSED') {
+      await this.forceSubmit(applicationId, 'AUTO_SUBMITTED_BROWSER_CLOSED');
+      forced = true;
+    } else if (sessionStillActive && summary.total >= MAX_INTERVIEW_WARNINGS) {
+      await this.forceSubmit(applicationId, 'AUTO_SUBMITTED_VIOLATIONS');
+      forced = true;
+    }
+
+    return { ...summary, forced };
+  }
+
+  async getViolationSummary(applicationId: string): Promise<ViolationSummary> {
+    const session = await this.prisma.aIInterviewSession.findUnique({
+      where: { applicationId },
+      select: { id: true },
+    });
+    if (!session) {
+      throw new NotFoundException(
+        'No interview has been scheduled for this application.',
+      );
+    }
+    return this.getViolationSummaryBySessionId(session.id);
+  }
+
+  private async getViolationSummaryBySessionId(
+    sessionId: string,
+  ): Promise<ViolationSummary> {
+    const grouped = await this.prisma.interviewViolation.groupBy({
+      by: ['type'],
+      where: { sessionId },
+      _count: { _all: true },
+    });
+    const counts: Partial<Record<ViolationType, number>> = {};
+    let total = 0;
+    for (const row of grouped) {
+      counts[row.type] = row._count._all;
+      total += row._count._all;
+    }
+    return { counts, total, riskLevel: riskLevelFor(total) };
+  }
+
+  /**
+   * Ends the interview early and grades whatever was answered so far —
+   * triggered by the proctoring system (5-warning cap, or a browser-close
+   * ping), never by the candidate. A no-op if the session already finished
+   * (e.g. a late sendBeacon arriving after a normal completion).
+   */
+  async forceSubmit(
+    applicationId: string,
+    reason: 'AUTO_SUBMITTED_VIOLATIONS' | 'AUTO_SUBMITTED_BROWSER_CLOSED',
+  ): Promise<InterviewResultView> {
+    const { session } = await this.loadContext(applicationId);
+    if (session.status !== 'PENDING' && session.status !== 'IN_PROGRESS') {
+      return { status: 'COMPLETED', message: interviewSubmittedMessage };
+    }
+    const answeredQuestions = session.questions.filter(
+      (q) => q.answerText !== null,
+    );
+    return this.completeInterview(
+      applicationId,
+      session.id,
+      answeredQuestions,
+      reason,
+    );
+  }
+
   private async completeInterview(
     applicationId: string,
     sessionId: string,
@@ -463,6 +604,8 @@ export class InterviewSessionService {
       expectedCore: string;
       targetSkill: { name: string } | null;
     }[],
+    terminationReason?:
+      'AUTO_SUBMITTED_VIOLATIONS' | 'AUTO_SUBMITTED_BROWSER_CLOSED',
   ): Promise<InterviewResultView> {
     const application = await this.prisma.application.findUniqueOrThrow({
       where: { id: applicationId },
@@ -504,6 +647,7 @@ export class InterviewSessionService {
         overallScore: grade.overallScore,
         recommendation: grade.recommendation,
         summary: grade.summary,
+        terminationReason: terminationReason ?? null,
       },
     });
 

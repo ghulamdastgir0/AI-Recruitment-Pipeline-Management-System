@@ -11,6 +11,7 @@ import { Input, Label } from "@/components/ui/Input";
 import {
   apiFetch,
   ApiError,
+  deleteRequest,
   downloadFile,
   patchJson,
   postForm,
@@ -176,6 +177,26 @@ function DocumentsAdmin() {
     }
   }
 
+  async function handleDelete(doc: CompanyDocument) {
+    if (
+      !window.confirm(
+        `Delete "${doc.name}" v${doc.version}? This permanently removes the file and cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setBusyId(doc.id);
+    setError(null);
+    try {
+      await deleteRequest(`/admin/documents/${doc.id}`);
+      loadDocuments();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to delete document.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <>
       <StaffNav />
@@ -268,6 +289,16 @@ function DocumentsAdmin() {
                   documentId={doc.id}
                   onUploaded={loadDocuments}
                 />
+                {doc.status !== "ACTIVE" && (
+                  <Button
+                    variant="destructive"
+                    className="px-2.5 py-1 text-xs"
+                    disabled={busyId === doc.id}
+                    onClick={() => void handleDelete(doc)}
+                  >
+                    Delete
+                  </Button>
+                )}
               </div>
             </Card>
           ))}

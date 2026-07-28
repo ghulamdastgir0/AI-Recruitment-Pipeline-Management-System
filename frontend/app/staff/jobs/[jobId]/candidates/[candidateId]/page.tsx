@@ -48,13 +48,38 @@ interface SkillGrade {
   justification: string;
 }
 
+interface ViolationSummary {
+  counts: Record<string, number>;
+  total: number;
+  riskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+}
+
 interface Transcript {
   sessionStatus: string;
   overallScore: number | null;
   recommendation: string | null;
   summary: string | null;
+  terminationReason: string | null;
   questions: TranscriptQuestion[];
   skillGrades: SkillGrade[];
+  violations: ViolationSummary;
+}
+
+const RISK_STYLES: Record<ViolationSummary["riskLevel"], string> = {
+  LOW: "bg-success-soft text-success-text",
+  MEDIUM: "bg-warning-soft text-warning-text",
+  HIGH: "bg-danger-soft text-danger-text",
+  CRITICAL: "bg-danger-soft text-danger-text",
+};
+
+function RiskBadge({ riskLevel }: { riskLevel: ViolationSummary["riskLevel"] }) {
+  return (
+    <span
+      className={`inline-block whitespace-nowrap rounded-full px-3 py-1 text-xs font-medium ${RISK_STYLES[riskLevel]}`}
+    >
+      {riskLevel} risk
+    </span>
+  );
 }
 
 interface Comment {
@@ -102,6 +127,12 @@ function CandidateDetail() {
   const [offerMessage, setOfferMessage] = useState<string | null>(null);
   const [offerError, setOfferError] = useState<string | null>(null);
   const [sendingOffer, setSendingOffer] = useState(false);
+
+  const [showDirectRejectDialog, setShowDirectRejectDialog] = useState(false);
+  const [directRejectError, setDirectRejectError] = useState<string | null>(
+    null,
+  );
+  const [submittingDirectReject, setSubmittingDirectReject] = useState(false);
 
   function loadMatch() {
     apiFetch<MatchResult>(`/job-postings/${jobId}/candidates/${candidateId}/match`)
@@ -172,6 +203,26 @@ function CandidateDetail() {
       );
     } finally {
       setSubmittingDecision(false);
+    }
+  }
+
+  async function submitDirectReject() {
+    if (submittingDirectReject) return;
+    setSubmittingDirectReject(true);
+    setDirectRejectError(null);
+    try {
+      await postJson(`/job-postings/${jobId}/candidates/${candidateId}/decision`, {
+        decision: "REJECTED",
+      });
+      setShowDirectRejectDialog(false);
+      setDecisionMessage('Decision "REJECTED" recorded and emailed.');
+      loadMatch();
+    } catch (err) {
+      setDirectRejectError(
+        err instanceof ApiError ? err.message : "Failed to reject candidate.",
+      );
+    } finally {
+      setSubmittingDirectReject(false);
     }
   }
 
@@ -296,6 +347,7 @@ function CandidateDetail() {
                     overallScore: match.overallScore,
                     summary: match.summary,
                     missingRequiredSkills: match.missingRequiredSkills,
+                    interviewTerminationReason: transcript?.terminationReason,
                   }}
                 />
               ) : (
@@ -386,6 +438,38 @@ function CandidateDetail() {
             </div>
           )}
         </section>
+
+        {transcript && transcript.violations.total > 0 && (
+          <section className="mt-8">
+            <div className="flex items-center gap-2">
+              <h2 className="font-heading text-base font-semibold text-text-primary">
+                Proctoring
+              </h2>
+              <RiskBadge riskLevel={transcript.violations.riskLevel} />
+            </div>
+            {transcript.terminationReason && (
+              <p className="mt-1 text-xs text-warning-text">
+                {transcript.terminationReason === "AUTO_SUBMITTED_VIOLATIONS"
+                  ? "This interview was auto-submitted after the candidate exceeded the maximum allowed warnings."
+                  : "This interview was auto-submitted after the candidate's browser/tab was closed mid-session."}
+              </p>
+            )}
+            <Card className="mt-2 p-3">
+              <p className="font-medium text-text-primary">
+                {transcript.violations.total} warning
+                {transcript.violations.total === 1 ? "" : "s"} recorded
+              </p>
+              <ul className="mt-2 flex flex-col gap-1 text-sm text-text-secondary">
+                {Object.entries(transcript.violations.counts).map(([type, count]) => (
+                  <li key={type} className="flex items-center justify-between">
+                    <span>{type.replaceAll("_", " ")}</span>
+                    <span className="font-medium text-text-primary">{count}</span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          </section>
+        )}
 
         <section className="mt-8">
           <h2 className="font-heading text-base font-semibold text-text-primary">
@@ -481,17 +565,36 @@ function CandidateDetail() {
             <h2 className="font-heading text-base font-semibold text-text-primary">
               Manager Review
             </h2>
+            {transcript?.terminationReason && (
+              <p className="mt-1 rounded-lg border border-warning bg-warning-soft px-3 py-2 text-sm text-warning-text">
+                This interview was auto-submitted by the proctoring system (
+                {transcript.terminationReason === "AUTO_SUBMITTED_VIOLATIONS"
+                  ? "exceeded the maximum allowed warnings"
+                  : "browser/tab closed mid-session"}
+                ) — you can reject directly below without waiting on manager
+                review.
+              </p>
+            )}
             <p className="mt-1 text-sm text-text-secondary">
               The AI interview is complete. Move this candidate into manager
               review before making a final decision.
             </p>
-            <Button
-              onClick={moveToManagerReview}
-              disabled={movingToManagerReview}
-              className="mt-3"
-            >
-              {movingToManagerReview ? "Moving…" : "Move to Manager Review"}
-            </Button>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                onClick={moveToManagerReview}
+                disabled={movingToManagerReview}
+              >
+                {movingToManagerReview ? "Moving…" : "Move to Manager Review"}
+              </Button>
+              {transcript?.terminationReason && (
+                <Button
+                  variant="destructive"
+                  onClick={() => setShowDirectRejectDialog(true)}
+                >
+                  Reject Directly
+                </Button>
+              )}
+            </div>
             {managerReviewError && (
               <p className="mt-2 text-sm text-danger">{managerReviewError}</p>
             )}
@@ -500,6 +603,48 @@ function CandidateDetail() {
             )}
           </Card>
         )}
+
+        <Dialog
+          open={showDirectRejectDialog}
+          onClose={() => {
+            if (submittingDirectReject) return;
+            setShowDirectRejectDialog(false);
+            setDirectRejectError(null);
+          }}
+          title="Reject this candidate directly?"
+        >
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-text-secondary">
+              This skips manager review entirely and immediately rejects the
+              application, sending the candidate a rejection email. This
+              cannot be undone.
+            </p>
+            {directRejectError && (
+              <p className="text-sm text-danger">{directRejectError}</p>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={submittingDirectReject}
+                onClick={() => {
+                  setShowDirectRejectDialog(false);
+                  setDirectRejectError(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={submittingDirectReject}
+                onClick={() => void submitDirectReject()}
+              >
+                {submittingDirectReject ? "Rejecting…" : "Reject Candidate"}
+              </Button>
+            </div>
+          </div>
+        </Dialog>
 
         {canDecide && match && match.applicationStatus === "MANAGER_REVIEWED" && (
           <section className="mt-8">

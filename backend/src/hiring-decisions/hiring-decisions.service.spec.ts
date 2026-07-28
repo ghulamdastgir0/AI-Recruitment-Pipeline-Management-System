@@ -21,7 +21,9 @@ function buildService() {
     record: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<AuditLogService>;
   const jobPostings = {
-    incrementHiredCountAndMaybeAutoClose: jest.fn().mockResolvedValue(undefined),
+    incrementHiredCountAndMaybeAutoClose: jest
+      .fn()
+      .mockResolvedValue(undefined),
   } as unknown as jest.Mocked<JobPostingsService>;
   const comments = {
     add: jest.fn().mockResolvedValue({
@@ -51,10 +53,16 @@ function buildService() {
   };
 }
 
-function mockApplication(overrides: { status?: string } = {}) {
+function mockApplication(
+  overrides: { status?: string; terminationReason?: string | null } = {},
+) {
   return {
     id: 'app-1',
     status: overrides.status ?? 'MANAGER_REVIEWED',
+    interviewSession:
+      overrides.terminationReason === undefined
+        ? null
+        : { terminationReason: overrides.terminationReason },
     job: { title: 'Backend Engineer' },
     candidateProfile: {
       extractedDataJson: { name: 'Jane', email: 'jane@example.com' },
@@ -155,6 +163,54 @@ describe('HiringDecisionsService', () => {
     );
   });
 
+  it('REJECTED: allowed directly from IN_REVIEW when the interview was auto-submitted by the proctoring system', async () => {
+    const { service, prisma, email } = buildService();
+    (prisma.application.findUnique as jest.Mock).mockResolvedValue(
+      mockApplication({
+        status: 'IN_REVIEW',
+        terminationReason: 'AUTO_SUBMITTED_VIOLATIONS',
+      }),
+    );
+
+    const result = await service.decide('cand-1', 'job-1', 'hr-1', {
+      decision: 'REJECTED',
+    });
+
+    expect(result.status).toBe('REJECTED');
+    expect(prisma.application.update).toHaveBeenCalledWith({
+      where: { id: 'app-1' },
+      data: { status: 'REJECTED' },
+    });
+    expect(email.send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'REJECTION' }),
+    );
+  });
+
+  it('SELECTED/NEXT_ROUND: still blocked from IN_REVIEW even when the interview was auto-submitted — only a direct REJECTED bypasses manager review', async () => {
+    const { service, prisma } = buildService();
+    (prisma.application.findUnique as jest.Mock).mockResolvedValue(
+      mockApplication({
+        status: 'IN_REVIEW',
+        terminationReason: 'AUTO_SUBMITTED_VIOLATIONS',
+      }),
+    );
+
+    await expect(
+      service.decide('cand-1', 'job-1', 'hr-1', { decision: 'SELECTED' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('REJECTED: still blocked from IN_REVIEW when the interview completed normally (no terminationReason)', async () => {
+    const { service, prisma } = buildService();
+    (prisma.application.findUnique as jest.Mock).mockResolvedValue(
+      mockApplication({ status: 'IN_REVIEW' }),
+    );
+
+    await expect(
+      service.decide('cand-1', 'job-1', 'hr-1', { decision: 'REJECTED' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
   it('throws ConflictException (and never re-sends an email) when the application already has a decision', async () => {
     const { service, prisma, email } = buildService();
     (prisma.application.findUnique as jest.Mock).mockResolvedValue(
@@ -203,7 +259,9 @@ describe('HiringDecisionsService', () => {
         service.sendOfferLetter('cand-1', 'job-1', 'hr-1'),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(prisma.application.update).not.toHaveBeenCalled();
-      expect(jobPostings.incrementHiredCountAndMaybeAutoClose).not.toHaveBeenCalled();
+      expect(
+        jobPostings.incrementHiredCountAndMaybeAutoClose,
+      ).not.toHaveBeenCalled();
     });
 
     it('moves a SELECTED application to HIRED, sends OFFER_LETTER, and increments hiredCount', async () => {

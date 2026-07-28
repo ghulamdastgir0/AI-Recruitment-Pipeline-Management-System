@@ -27,6 +27,13 @@ const IN_FLIGHT_APPLICATION_STATUSES: AppStatus[] = [
   'MANAGER_REVIEWED',
 ];
 
+// How long a same-actor/same-rawPrompt DRAFT is treated as "still the same
+// in-progress assistant conversation" for create()'s duplicate-draft guard —
+// generous enough to cover a multi-message back-and-forth without merging
+// two genuinely separate later requests that happen to reuse identical
+// wording.
+const DUPLICATE_DRAFT_WINDOW_MS = 2 * 60 * 60 * 1000;
+
 // Shared shape instructions for the candidate-facing summary, used by both
 // the combined drafting prompt and the standalone re-summarize prompt so the
 // two paths can never drift into different lengths/styles. Responsibilities
@@ -85,17 +92,27 @@ export class JobPostingsService {
     dto: CreateJobPostingDto,
     createdByUserId: string,
   ): Promise<JobPostingWithSkills> {
-    const hrSuppliedDescription = dto.description?.trim();
+    // The recruitment assistant is stateless across chat turns (see
+    // AssistantOrchestratorService) and re-decides on every message whether
+    // it has "enough" info to call createJobPosting — if it asks HR several
+    // clarifying questions across separate messages instead of gathering
+    // them all before calling the tool once, each answer can trigger another
+    // full createJobPosting call. Without this guard, that produces one
+    // duplicate DRAFT Job row per follow-up message instead of one job with
+    // its details filled in incrementally. Same actor + identical rawPrompt
+    // (the assistant is instructed to pass HR's original request verbatim
+    // every time) + still a DRAFT + recent = treated as the same in-progress
+    // request and updated in place rather than inserted again.
+    const duplicate = await this.findRecentDuplicateDraft(
+      dto.rawPrompt,
+      createdByUserId,
+    );
+    if (duplicate) {
+      return this.overwriteDraft(duplicate.id, dto, createdByUserId);
+    }
+
     const { description, responsibilities, candidateSummary } =
-      hrSuppliedDescription
-        ? {
-            description: hrSuppliedDescription,
-            responsibilities: dto.responsibilities ?? [],
-            candidateSummary: await this.summarizeForCandidates(
-              hrSuppliedDescription,
-            ),
-          }
-        : await this.draftDescription(dto);
+      await this.resolveContent(dto);
 
     const job = await this.prisma.job.create({
       data: {
@@ -132,6 +149,88 @@ export class JobPostingsService {
     return this.getById(job.id);
   }
 
+  private async resolveContent(dto: CreateJobPostingDto): Promise<{
+    description: string;
+    responsibilities: string[];
+    candidateSummary: string | null;
+  }> {
+    const hrSuppliedDescription = dto.description?.trim();
+    return hrSuppliedDescription
+      ? {
+          description: hrSuppliedDescription,
+          responsibilities: dto.responsibilities ?? [],
+          candidateSummary: await this.summarizeForCandidates(
+            hrSuppliedDescription,
+          ),
+        }
+      : this.draftDescription(dto);
+  }
+
+  private async findRecentDuplicateDraft(
+    rawPrompt: string,
+    createdByUserId: string,
+  ) {
+    const cutoff = new Date(Date.now() - DUPLICATE_DRAFT_WINDOW_MS);
+    return this.prisma.job.findFirst({
+      where: {
+        createdByUserId,
+        rawPrompt,
+        status: 'DRAFT',
+        createdAt: { gte: cutoff },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /**
+   * Re-drafts an already-created DRAFT in place instead of inserting a new
+   * Job row — see the duplicate-request guard in create(). Always
+   * regenerates description/responsibilities/candidateSummary and fully
+   * replaces the skill lists, since each createJobPosting call is meant to
+   * carry HR's complete current picture of the role, not an incremental
+   * patch (unlike updateJobPosting, which is patch-semantics by design).
+   */
+  private async overwriteDraft(
+    jobId: string,
+    dto: CreateJobPostingDto,
+    actorUserId: string,
+  ): Promise<JobPostingWithSkills> {
+    const { description, responsibilities, candidateSummary } =
+      await this.resolveContent(dto);
+
+    await this.prisma.job.update({
+      where: { id: jobId },
+      data: {
+        title: dto.title,
+        generatedDescription: description,
+        description,
+        responsibilities,
+        candidateSummary,
+        experienceMin: dto.experienceMin,
+        salaryMax: dto.salaryMax,
+        deadline: new Date(dto.deadline),
+        hiringTarget: dto.hiringTarget,
+        location: dto.location,
+        seniority: dto.seniority,
+        workModel: dto.workModel,
+      },
+    });
+
+    await this.syncSkills(jobId, dto.requiredSkills ?? [], true);
+    await this.syncSkills(jobId, dto.preferredSkills ?? [], false);
+    await this.refreshEmbedding(jobId);
+
+    await this.audit.record({
+      actorUserId,
+      action: 'job_posting.redrafted',
+      resourceType: 'Job',
+      resourceId: jobId,
+      details: { title: dto.title },
+    });
+
+    return this.getById(jobId);
+  }
+
   async update(
     id: string,
     changes: UpdateJobPostingDto,
@@ -144,10 +243,7 @@ export class JobPostingsService {
     // method the assistant's updateJobPosting tool calls) could set
     // status: 'PUBLISHED' directly and skip it entirely. Sharing the same
     // guard here closes that gap regardless of which write path is used.
-    if (
-      changes.status === 'PUBLISHED' &&
-      current.status !== 'PUBLISHED'
-    ) {
+    if (changes.status === 'PUBLISHED' && current.status !== 'PUBLISHED') {
       await this.assertHiringManagerAssigned(id);
     }
 
@@ -193,7 +289,8 @@ export class JobPostingsService {
               // Mirrors publish()/pause()'s own timestamp bookkeeping so a
               // status change routed through this generic path doesn't
               // silently skip it.
-              ...(changes.status === 'PUBLISHED' && current.status !== 'PUBLISHED'
+              ...(changes.status === 'PUBLISHED' &&
+              current.status !== 'PUBLISHED'
                 ? { portalPublishedAt: new Date() }
                 : {}),
               ...(changes.status === 'PAUSED' && current.status !== 'PAUSED'
@@ -274,10 +371,7 @@ export class JobPostingsService {
     return this.getById(id);
   }
 
-  async resume(
-    id: string,
-    actorUserId: string,
-  ): Promise<JobPostingWithSkills> {
+  async resume(id: string, actorUserId: string): Promise<JobPostingWithSkills> {
     const job = await this.getById(id);
     if (job.status === 'PUBLISHED') return job;
     if (job.status !== 'PAUSED') {
@@ -330,7 +424,10 @@ export class JobPostingsService {
   }
 
   /** Archives a closed posting — purely a status change, no further side effects (the bulk rejection already happened at close time). */
-  async archive(id: string, actorUserId: string): Promise<JobPostingWithSkills> {
+  async archive(
+    id: string,
+    actorUserId: string,
+  ): Promise<JobPostingWithSkills> {
     const job = await this.getById(id);
     if (job.status === 'ARCHIVED') return job;
     if (job.status !== 'CLOSED') {
@@ -477,9 +574,9 @@ export class JobPostingsService {
 
   /** Shared by publish() and update() (status -> PUBLISHED) so the rule can't be bypassed by whichever write path is used. */
   private async assertHiringManagerAssigned(id: string): Promise<void> {
-    const hiringManagerCount = await this.prisma.jobPostingHiringManager.count(
-      { where: { jobId: id } },
-    );
+    const hiringManagerCount = await this.prisma.jobPostingHiringManager.count({
+      where: { jobId: id },
+    });
     if (hiringManagerCount === 0) {
       throw new BadRequestException(
         'Assign at least one Hiring Manager before publishing this job posting.',

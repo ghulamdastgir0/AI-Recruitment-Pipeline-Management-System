@@ -193,7 +193,6 @@ function StaffDashboard() {
     // doesn't fire its own request.
     const timeoutId = setTimeout(() => loadJobs(search), 300);
     return () => clearTimeout(timeoutId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadJobs is stable per render
   }, [search]);
 
   const canManage = user?.role === "SUPER_ADMIN" || user?.role === "HR_ADMIN";

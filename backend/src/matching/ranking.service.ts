@@ -15,6 +15,14 @@ export interface RankedCandidate {
   summary: string;
   missingRequiredSkills: string[];
   processedAt: Date | null;
+  /**
+   * Set only if the AI interview was auto-submitted early by the proctoring
+   * system (5-warning cap or a browser-close ping) rather than completed
+   * naturally — lets the UI show the real reason a REJECTED candidate was
+   * rejected instead of the (unrelated) CV-match summary. See
+   * InterviewSessionService.forceSubmit/terminationReason.
+   */
+  interviewTerminationReason: string | null;
 }
 
 export interface RankFilters {
@@ -70,6 +78,7 @@ export class RankingService {
           },
         },
         matchResults: { orderBy: { processedAt: 'desc' }, take: 1 },
+        interviewSession: { select: { terminationReason: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -82,6 +91,8 @@ export class RankingService {
         const { name: candidateName } = resolveCandidateIdentity(
           app.candidateProfile,
         );
+        const interviewTerminationReason =
+          app.interviewSession?.terminationReason ?? null;
         const latest = app.matchResults[0];
         if (latest) {
           return {
@@ -96,6 +107,7 @@ export class RankingService {
             missingRequiredSkills:
               (latest.missingRequiredSkillsJson as string[] | null) ?? [],
             processedAt: latest.processedAt,
+            interviewTerminationReason,
           };
         }
         return {
@@ -112,6 +124,7 @@ export class RankingService {
           ),
           missingRequiredSkills: [],
           processedAt: null,
+          interviewTerminationReason,
         };
       })
       .sort((a, b) => (b.overallScore ?? -1) - (a.overallScore ?? -1));

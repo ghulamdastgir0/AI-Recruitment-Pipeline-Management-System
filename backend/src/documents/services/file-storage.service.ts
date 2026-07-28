@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -34,5 +34,13 @@ export class FileStorageService {
 
   async read(filePath: string): Promise<Buffer> {
     return readFile(filePath);
+  }
+
+  async remove(filePath: string): Promise<void> {
+    try {
+      await unlink(filePath);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
   }
 }

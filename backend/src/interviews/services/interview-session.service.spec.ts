@@ -20,6 +20,10 @@ function buildService() {
     },
     skill: { upsert: jest.fn() },
     candidateSkillGrade: { upsert: jest.fn().mockResolvedValue({}) },
+    interviewViolation: {
+      groupBy: jest.fn().mockResolvedValue([]),
+      create: jest.fn().mockResolvedValue({}),
+    },
   } as unknown as jest.Mocked<PrismaService>;
 
   const audio = {

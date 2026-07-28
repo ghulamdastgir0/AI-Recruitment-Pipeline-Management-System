@@ -162,6 +162,28 @@ export class DocumentService {
     return this.getById(id);
   }
 
+  /** Permanently deletes a document version (file, DB row, and its chunks). Refuses to delete the ACTIVE version — deactivate it first. */
+  async delete(id: string, actorUserId: string): Promise<void> {
+    const document = await this.getById(id);
+
+    if (document.status === 'ACTIVE') {
+      throw new ConflictException(
+        'This document version is active. Deactivate it (or activate another version) before deleting it.',
+      );
+    }
+
+    await this.prisma.document.delete({ where: { id } });
+    await this.storage.remove(document.filePath);
+
+    await this.audit.record({
+      actorUserId,
+      action: 'document.deleted',
+      resourceType: 'Document',
+      resourceId: id,
+      details: { name: document.name, version: document.version },
+    });
+  }
+
   private async createVersion(
     name: string,
     file: UploadedPdf,

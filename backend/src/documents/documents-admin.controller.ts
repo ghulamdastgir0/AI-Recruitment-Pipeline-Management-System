@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   HttpStatus,
   Param,
   ParseFilePipeBuilder,
@@ -197,5 +199,19 @@ export class DocumentsAdminController {
   ): Promise<DocumentResponseDto> {
     const document = await this.documents.setStatus(id, body.status, user.id);
     return toResponseDto(document);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({
+    summary:
+      'Permanently delete a document version and its embedded chunks. The ACTIVE version must be deactivated first.',
+  })
+  @ApiResponse({ status: 204 })
+  async remove(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<void> {
+    await this.documents.delete(id, user.id);
   }
 }

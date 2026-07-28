@@ -430,9 +430,34 @@ model AIInterviewSession {
   recommendation String?
   summary        String? @db.Text
 
+  // Set only when completeInterview() was triggered early by the proctoring
+  // system (5-warning cap, or a browser-close ping) rather than by the
+  // candidate naturally exhausting the question set — lets HR distinguish a
+  // normal completion from a forced one on the transcript view.
+  terminationReason String?
+
   application Application           @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   questions   AIInterviewQuestion[]
   skillGrades CandidateSkillGrade[]
+  violations  InterviewViolation[]
+}
+
+// ─── Interview Proctoring ─────────────────────────────────────
+// One row per detected/reported irregularity during a live AI interview
+// (face missing, phone visible, tab switch, etc.) — see
+// InterviewSessionService.logViolation(). Never deleted/updated, so the
+// full timeline is auditable the same way EmailLog/AuditLog are.
+
+model InterviewViolation {
+  id           String        @id @default(uuid())
+  sessionId    String
+  type         ViolationType
+  metadataJson Json?
+  createdAt    DateTime      @default(now())
+
+  session AIInterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
 }
 
 model AIInterviewQuestion {
@@ -623,4 +648,18 @@ enum BackgroundJobStatus {
   PROCESSING
   COMPLETED
   FAILED
+}
+
+enum ViolationType {
+  FACE_MISSING
+  MULTIPLE_FACES
+  LOOKING_AWAY
+  MOBILE_DETECTED
+  TAB_SWITCH
+  FULLSCREEN_EXIT
+  WINDOW_BLUR
+  CAMERA_DISABLED
+  MICROPHONE_DISABLED
+  BROWSER_CLOSED
+  SHORTCUT_ATTEMPTED
 }

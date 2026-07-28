@@ -73,14 +73,34 @@ export class HiringDecisionsService {
           jobId: jobPostingId,
         },
       },
-      include: { job: true, candidateProfile: true },
+      include: {
+        job: true,
+        candidateProfile: true,
+        interviewSession: { select: { terminationReason: true } },
+      },
     });
     if (!application) {
       throw new NotFoundException(
         `No application found for candidate "${candidateId}" and job posting "${jobPostingId}".`,
       );
     }
-    if (application.status !== 'MANAGER_REVIEWED') {
+
+    // Normally a decision requires the assigned Hiring Manager's review
+    // first (MANAGER_REVIEWED). Exception: if the proctoring system
+    // auto-submitted this interview (5-warning cap or a browser-close
+    // ping — see InterviewSessionService.forceSubmit/terminationReason),
+    // HR can reject straight from IN_REVIEW without waiting on a manager
+    // review that adds no value over a compromised interview. SELECTED/
+    // NEXT_ROUND still require the normal manager-review path even for an
+    // auto-submitted session — only a REJECTED bypass is allowed.
+    const wasAutoSubmitted =
+      application.interviewSession?.terminationReason != null;
+    const canRejectDirectly =
+      input.decision === 'REJECTED' &&
+      wasAutoSubmitted &&
+      application.status === 'IN_REVIEW';
+
+    if (application.status !== 'MANAGER_REVIEWED' && !canRejectDirectly) {
       throw new ConflictException(
         `This application is ${application.status.toLowerCase()}, not awaiting a decision — the assigned Hiring Manager may not have completed their review yet, or a decision may already have been recorded.`,
       );

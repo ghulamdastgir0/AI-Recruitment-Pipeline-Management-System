@@ -252,6 +252,7 @@ interface RankedCandidate {
   confidence: string | null;
   summary: string;
   missingRequiredSkills: string[];
+  interviewTerminationReason: string | null;
 }
 
 interface HiringManagerOption {
@@ -666,6 +667,7 @@ function JobDetail() {
                     overallScore: candidate.overallScore,
                     summary: candidate.summary,
                     missingRequiredSkills: candidate.missingRequiredSkills,
+                    interviewTerminationReason: candidate.interviewTerminationReason,
                   }}
                 />
               ) : (
