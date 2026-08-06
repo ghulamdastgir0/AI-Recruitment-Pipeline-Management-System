@@ -65,6 +65,7 @@ function buildService(
           hiringTarget: options.hiringTarget,
         }),
       ),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
     skill: {
       upsert: jest.fn(({ where }: { where: { name: string } }) =>
@@ -402,6 +403,32 @@ describe('JobPostingsService.close/archive — auto-close-at-target (finding #17
         data: expect.objectContaining({ status: 'CLOSED' }),
       }),
     );
+  });
+});
+
+describe('JobPostingsService.closeExpiredPublishedJobs — deadline sweep', () => {
+  it('closes only PUBLISHED postings whose deadline has passed, without bulk-rejecting applications', async () => {
+    const { service, prisma } = buildService();
+    (prisma.job.updateMany as jest.Mock).mockResolvedValue({ count: 2 });
+
+    const count = await service.closeExpiredPublishedJobs();
+
+    expect(count).toBe(2);
+    expect(prisma.job.updateMany).toHaveBeenCalledWith({
+      where: { status: 'PUBLISHED', deadline: { lt: expect.any(Date) } },
+      data: { status: 'CLOSED', portalUnpublishedAt: expect.any(Date) },
+    });
+    // Unlike close(), this must never touch in-flight applications.
+    expect(prisma.application.findMany).not.toHaveBeenCalled();
+    expect(prisma.application.update).not.toHaveBeenCalled();
+  });
+
+  it('returns 0 and does not throw when nothing is past its deadline', async () => {
+    const { service, prisma } = buildService();
+    (prisma.job.updateMany as jest.Mock).mockResolvedValue({ count: 0 });
+
+    await expect(service.closeExpiredPublishedJobs()).resolves.toBe(0);
+    expect(prisma.application.update).not.toHaveBeenCalled();
   });
 });
 

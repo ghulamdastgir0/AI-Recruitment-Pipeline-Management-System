@@ -11,7 +11,8 @@ import { Timeline } from "@/components/Timeline";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Dialog } from "@/components/ui/Dialog";
-import { Textarea } from "@/components/ui/Input";
+import { Input, Textarea } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
 import {
   apiFetch,
   ApiError,
@@ -20,6 +21,7 @@ import {
   postJson,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useToast } from "@/lib/toast";
 
 interface MatchResult {
   candidateName: string | null;
@@ -101,7 +103,12 @@ function CandidateDetail() {
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [transcriptMessage, setTranscriptMessage] = useState<string | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
+  const [commentsMessage, setCommentsMessage] = useState<string | null>(null);
   const [newComment, setNewComment] = useState("");
+  const [commentError, setCommentError] = useState<string | null>(null);
+  const [submittingComment, setSubmittingComment] = useState(false);
+  const [downloadingCv, setDownloadingCv] = useState(false);
+  const { showToast } = useToast();
 
   const [decision, setDecision] = useState<Decision>("SELECTED");
   const [nextRoundTime, setNextRoundTime] = useState("");
@@ -150,8 +157,16 @@ function CandidateDetail() {
     apiFetch<Comment[]>(
       `/job-postings/${jobId}/candidates/${candidateId}/comments`,
     )
-      .then(setComments)
-      .catch(() => setComments([]));
+      .then((rows) => {
+        setComments(rows);
+        setCommentsMessage(null);
+      })
+      .catch((err) => {
+        setComments([]);
+        setCommentsMessage(
+          err instanceof ApiError ? err.message : "Failed to load comments.",
+        );
+      });
   }
 
   useEffect(() => {
@@ -171,12 +186,22 @@ function CandidateDetail() {
 
   async function submitComment(event: FormEvent) {
     event.preventDefault();
-    if (!newComment.trim()) return;
-    await postJson(`/job-postings/${jobId}/candidates/${candidateId}/comments`, {
-      content: newComment,
-    });
-    setNewComment("");
-    loadComments();
+    if (!newComment.trim() || submittingComment) return;
+    setSubmittingComment(true);
+    setCommentError(null);
+    try {
+      await postJson(`/job-postings/${jobId}/candidates/${candidateId}/comments`, {
+        content: newComment,
+      });
+      setNewComment("");
+      loadComments();
+    } catch (err) {
+      setCommentError(
+        err instanceof ApiError ? err.message : "Failed to post comment.",
+      );
+    } finally {
+      setSubmittingComment(false);
+    }
   }
 
   async function submitDecision(event: FormEvent) {
@@ -196,6 +221,7 @@ function CandidateDetail() {
           : {}),
       });
       setDecisionMessage(`Decision "${decision}" recorded and emailed.`);
+      showToast(`Decision "${decision}" recorded and emailed.`);
       loadMatch();
     } catch (err) {
       setDecisionError(
@@ -216,6 +242,7 @@ function CandidateDetail() {
       });
       setShowDirectRejectDialog(false);
       setDecisionMessage('Decision "REJECTED" recorded and emailed.');
+      showToast('Decision "REJECTED" recorded and emailed.');
       loadMatch();
     } catch (err) {
       setDirectRejectError(
@@ -236,6 +263,7 @@ function CandidateDetail() {
         {},
       );
       setManagerReviewMessage("Moved to manager review.");
+      showToast("Moved to manager review.");
       loadMatch();
     } catch (err) {
       setManagerReviewError(
@@ -258,6 +286,7 @@ function CandidateDetail() {
       );
       setShowReviewDialog(false);
       setReviewComment("");
+      showToast("Review submitted.");
       loadComments();
       loadMatch();
     } catch (err) {
@@ -280,6 +309,7 @@ function CandidateDetail() {
         ...(offerDetails.trim() ? { offerDetails: offerDetails.trim() } : {}),
       });
       setOfferMessage("Offer letter sent.");
+      showToast("Offer letter sent.");
       loadMatch();
     } catch (err) {
       setOfferError(
@@ -362,15 +392,26 @@ function CandidateDetail() {
               )}
               <Button
                 variant="secondary"
-                onClick={() =>
-                  void downloadFile(
-                    `/job-postings/${jobId}/candidates/${candidateId}/cv`,
-                    `${match.candidateName ?? candidateId}.pdf`,
-                  )
-                }
+                disabled={downloadingCv}
+                onClick={async () => {
+                  setDownloadingCv(true);
+                  try {
+                    await downloadFile(
+                      `/job-postings/${jobId}/candidates/${candidateId}/cv`,
+                      `${match.candidateName ?? candidateId}.pdf`,
+                    );
+                  } catch (err) {
+                    showToast(
+                      err instanceof ApiError ? err.message : "Failed to download CV.",
+                      "danger",
+                    );
+                  } finally {
+                    setDownloadingCv(false);
+                  }
+                }}
                 className="mt-3 px-2.5 py-1 text-xs"
               >
-                Download CV
+                {downloadingCv ? "Downloading…" : "Download CV"}
               </Button>
             </Card>
           )}
@@ -475,13 +516,16 @@ function CandidateDetail() {
           <h2 className="font-heading text-base font-semibold text-text-primary">
             Comments
           </h2>
+          {commentsMessage && (
+            <p className="mt-2 text-sm text-danger">{commentsMessage}</p>
+          )}
           <ul className="mt-2 flex flex-col gap-2">
             {comments.map((comment) => (
               <Card key={comment.id} as="li" className="p-3 text-sm text-text-secondary">
                 {comment.content}
               </Card>
             ))}
-            {comments.length === 0 && (
+            {comments.length === 0 && !commentsMessage && (
               <p className="text-sm text-text-muted">No comments yet.</p>
             )}
           </ul>
@@ -492,9 +536,19 @@ function CandidateDetail() {
                 onChange={(event) => setNewComment(event.target.value)}
                 placeholder="Add a comment…"
                 rows={2}
+                maxLength={2000}
+                disabled={submittingComment}
+                required
               />
-              <Button type="submit" className="self-start">
-                Post Comment
+              {commentError && (
+                <p className="text-sm text-danger">{commentError}</p>
+              )}
+              <Button
+                type="submit"
+                disabled={submittingComment || !newComment.trim()}
+                className="self-start"
+              >
+                {submittingComment ? "Posting…" : "Post Comment"}
               </Button>
             </form>
           )}
@@ -534,6 +588,7 @@ function CandidateDetail() {
               onChange={(event) => setReviewComment(event.target.value)}
               placeholder="Add your review comment…"
               rows={4}
+              maxLength={2000}
               disabled={submittingReview}
               autoFocus
             />
@@ -653,38 +708,37 @@ function CandidateDetail() {
             </h2>
             <Card className="mt-2">
               <form onSubmit={submitDecision} className="flex flex-col gap-3">
-                <select
+                <Select
                   value={decision}
                   onChange={(event) => setDecision(event.target.value as Decision)}
                   disabled={submittingDecision}
-                  className="rounded-[var(--radius-control)] border border-border bg-white px-3 py-2 text-sm text-text-primary focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-100"
                 >
                   <option value="SELECTED">Selected</option>
                   <option value="NEXT_ROUND">Next Round</option>
                   <option value="REJECTED">Rejected</option>
-                </select>
+                </Select>
                 {decision === "NEXT_ROUND" && (
                   <>
                     <label className="text-sm text-text-secondary">
                       Next round time
-                      <input
+                      <Input
                         required
                         type="datetime-local"
                         value={nextRoundTime}
                         onChange={(event) => setNextRoundTime(event.target.value)}
                         disabled={submittingDecision}
-                        className="mt-1 w-full rounded-[var(--radius-control)] border border-border px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-100"
+                        className="mt-1"
                       />
                     </label>
                     <label className="text-sm text-text-secondary">
                       Response deadline
-                      <input
+                      <Input
                         required
                         type="datetime-local"
                         value={nextRoundDeadline}
                         onChange={(event) => setNextRoundDeadline(event.target.value)}
                         disabled={submittingDecision}
-                        className="mt-1 w-full rounded-[var(--radius-control)] border border-border px-3 py-2 text-sm focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-100"
+                        className="mt-1"
                       />
                     </label>
                   </>
@@ -727,6 +781,7 @@ function CandidateDetail() {
                   onChange={(event) => setOfferDetails(event.target.value)}
                   placeholder="Optional details to include (start date, compensation, next steps)…"
                   rows={3}
+                  maxLength={2000}
                   disabled={sendingOffer}
                 />
                 {offerError && <p className="text-sm text-danger">{offerError}</p>}

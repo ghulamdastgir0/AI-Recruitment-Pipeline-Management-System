@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { DocumentsModule } from '../documents/documents.module';
+import { DeadlineSweepService } from './deadline-sweep.service';
 import { DraftJobsSweepService } from './draft-jobs-sweep.service';
 import { JobPostingAssignmentsController } from './job-posting-assignments.controller';
 import { JobPostingAssignmentsService } from './job-posting-assignments.service';
@@ -18,6 +19,7 @@ import { PublicJobPostingsController } from './public-job-postings.controller';
     JobPostingsService,
     JobPostingAssignmentsService,
     DraftJobsSweepService,
+    DeadlineSweepService,
   ],
   exports: [JobPostingsService, JobPostingAssignmentsService],
 })

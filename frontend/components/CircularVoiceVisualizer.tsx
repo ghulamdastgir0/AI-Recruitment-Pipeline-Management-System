@@ -64,9 +64,11 @@ export function CircularVoiceVisualizer({
         cy,
         coreRadius * 2.2,
       );
-      halo.addColorStop(0, "rgba(99,140,255,0.55)");
-      halo.addColorStop(0.55, "rgba(99,102,241,0.18)");
-      halo.addColorStop(1, "rgba(99,102,241,0)");
+      // Colors mirror the brand tokens in globals.css (brand-400/500) so the
+      // visualizer doesn't silently drift from the rest of the UI's blue.
+      halo.addColorStop(0, "rgba(98,141,245,0.55)"); // brand-400
+      halo.addColorStop(0.55, "rgba(59,111,240,0.18)"); // brand-500
+      halo.addColorStop(1, "rgba(59,111,240,0)"); // brand-500
       ctx.fillStyle = halo;
       ctx.beginPath();
       ctx.arc(cx, cy, coreRadius * 2.2, 0, Math.PI * 2);
@@ -84,7 +86,7 @@ export function CircularVoiceVisualizer({
         const x2 = cx + Math.cos(angle) * outerRadius;
         const y2 = cy + Math.sin(angle) * outerRadius;
         const alpha = 0.35 + level * 0.65;
-        ctx.strokeStyle = `rgba(129,140,248,${alpha})`;
+        ctx.strokeStyle = `rgba(147,178,251,${alpha})`; // brand-300
         ctx.lineWidth = Math.max(2, ((2 * Math.PI * barInnerRadius) / BAR_COUNT) * 0.5);
         ctx.lineCap = "round";
         ctx.beginPath();

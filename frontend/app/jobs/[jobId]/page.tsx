@@ -8,7 +8,7 @@ import { JobPostingView } from "@/components/JobPostingView";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input, Label } from "@/components/ui/Input";
-import { API_BASE_URL, apiFetch, ApiError } from "@/lib/api";
+import { apiFetch, ApiError, postForm } from "@/lib/api";
 
 const COMPANY_NAME =
   process.env.NEXT_PUBLIC_COMPANY_NAME ?? "AI Recruitment Pipeline";
@@ -68,30 +68,20 @@ export default function JobDetailPage() {
       form.append("candidateEmail", candidateEmail);
       form.append("candidatePhone", candidatePhone);
       form.append("file", file);
-      const response = await fetch(`${API_BASE_URL}/candidates/upload`, {
-        method: "POST",
-        body: form,
-      });
-      const body: unknown = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const message =
-          body && typeof body === "object" && "message" in body
-            ? String((body as { message: unknown }).message)
-            : "Upload failed.";
-        if (
-          response.status === 409 &&
-          body &&
-          typeof body === "object" &&
-          "applicationId" in body &&
-          typeof (body as { applicationId: unknown }).applicationId === "string"
-        ) {
-          setExistingApplicationId((body as { applicationId: string }).applicationId);
-        }
-        throw new Error(message);
-      }
-      setResult(body as UploadCvResult);
+      const uploaded = await postForm<UploadCvResult>("/candidates/upload", form);
+      setResult(uploaded);
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Upload failed.");
+      if (
+        err instanceof ApiError &&
+        err.status === 409 &&
+        err.body &&
+        typeof err.body === "object" &&
+        "applicationId" in err.body &&
+        typeof (err.body as { applicationId: unknown }).applicationId === "string"
+      ) {
+        setExistingApplicationId((err.body as { applicationId: string }).applicationId);
+      }
+      setSubmitError(err instanceof ApiError ? err.message : "Upload failed.");
     } finally {
       setSubmitting(false);
     }
@@ -160,6 +150,7 @@ export default function JobDetailPage() {
                 <Input
                   id="candidateName"
                   required
+                  maxLength={80}
                   placeholder="Jane Doe"
                   value={candidateName}
                   onChange={(event) => setCandidateName(event.target.value)}
@@ -171,6 +162,7 @@ export default function JobDetailPage() {
                   id="candidateEmail"
                   required
                   type="email"
+                  maxLength={254}
                   placeholder="jane@example.com"
                   value={candidateEmail}
                   onChange={(event) => setCandidateEmail(event.target.value)}
@@ -182,6 +174,7 @@ export default function JobDetailPage() {
                   id="candidatePhone"
                   required
                   type="tel"
+                  maxLength={30}
                   placeholder="+1 555 010 0100"
                   value={candidatePhone}
                   onChange={(event) => setCandidatePhone(event.target.value)}
@@ -198,24 +191,27 @@ export default function JobDetailPage() {
                     onChange={(event) => setFile(event.target.files?.[0] ?? null)}
                     className="text-sm"
                   />
+                  {file && (
+                    <p className="mt-2 text-xs font-medium text-text-secondary">
+                      Selected: {file.name}
+                    </p>
+                  )}
                 </div>
               </div>
-              {submitError && (
-                <p className="text-sm text-danger">
-                  {submitError}
-                  {existingApplicationId && (
-                    <>
-                      {" "}
-                      <Link
-                        href={`/status/${existingApplicationId}`}
-                        className="font-medium underline hover:no-underline"
-                      >
-                        View your application status
-                      </Link>
-                      .
-                    </>
-                  )}
+              {submitError && existingApplicationId && (
+                <p className="rounded-[var(--radius-control)] border border-brand-200 bg-brand-50 px-3 py-2 text-sm text-brand-700">
+                  {submitError}{" "}
+                  <Link
+                    href={`/status/${existingApplicationId}`}
+                    className="font-medium underline hover:no-underline"
+                  >
+                    View your application status
+                  </Link>
+                  .
                 </p>
+              )}
+              {submitError && !existingApplicationId && (
+                <p className="text-sm text-danger">{submitError}</p>
               )}
               <Button type="submit" disabled={!file || submitting} className="self-start">
                 {submitting ? "Submitting…" : "Submit Application"}

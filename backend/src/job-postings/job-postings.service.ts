@@ -476,6 +476,25 @@ export class JobPostingsService {
     }
   }
 
+  /**
+   * Called by DeadlineSweepService (daily). Closes every PUBLISHED posting
+   * whose application deadline has passed — hides it from the public /jobs
+   * list and blocks new self-applications (see cv-upload.service.ts's
+   * status==='PUBLISHED' gate) so HR doesn't have to remember to pause/close
+   * expired postings by hand. Deliberately does NOT call close(), which
+   * bulk-rejects every in-flight application: a passed deadline should only
+   * turn away *new* applicants, not reject candidates who already applied
+   * and are still being reviewed. HR can reopen it (Publish) after extending
+   * the deadline via Edit.
+   */
+  async closeExpiredPublishedJobs(): Promise<number> {
+    const result = await this.prisma.job.updateMany({
+      where: { status: 'PUBLISHED', deadline: { lt: new Date() } },
+      data: { status: 'CLOSED', portalUnpublishedAt: new Date() },
+    });
+    return result.count;
+  }
+
   private async bulkRejectInFlightApplications(
     jobId: string,
     jobTitle: string,

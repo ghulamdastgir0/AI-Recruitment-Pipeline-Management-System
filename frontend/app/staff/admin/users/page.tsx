@@ -7,6 +7,7 @@ import { StaffNav } from "@/components/StaffNav";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input, Label } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
 import {
   apiFetch,
   ApiError,
@@ -14,6 +15,7 @@ import {
   patchJson,
   postJson,
 } from "@/lib/api";
+import { useToast } from "@/lib/toast";
 
 type AssignableRole = "HR_ADMIN" | "HIRING_MANAGER";
 
@@ -27,9 +29,6 @@ interface User {
   createdAt: string;
 }
 
-const ROLE_SELECT_CLASSES =
-  "rounded-[var(--radius-control)] border border-border bg-white px-3 py-2 text-sm text-text-primary focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-100";
-
 function RoleSelect({
   value,
   onChange,
@@ -40,15 +39,15 @@ function RoleSelect({
   id?: string;
 }) {
   return (
-    <select
+    <Select
       id={id}
       value={value}
       onChange={(e) => onChange(e.target.value as AssignableRole)}
-      className={`${ROLE_SELECT_CLASSES} sm:w-64`}
+      className="sm:w-64"
     >
       <option value="HR_ADMIN">HR Admin</option>
       <option value="HIRING_MANAGER">Hiring Manager</option>
-    </select>
+    </Select>
   );
 }
 
@@ -60,6 +59,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
   const [role, setRole] = useState<AssignableRole>("HR_ADMIN");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const { showToast } = useToast();
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -72,6 +72,7 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
       setFirstName("");
       setLastName("");
       setRole("HR_ADMIN");
+      showToast("User created.");
       onCreated();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to create user.");
@@ -89,6 +90,8 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
             <Input
               id="new-first-name"
               required
+              maxLength={40}
+              placeholder="First name"
               value={firstName}
               onChange={(e) => setFirstName(e.target.value)}
             />
@@ -98,6 +101,8 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
             <Input
               id="new-last-name"
               required
+              maxLength={40}
+              placeholder="Last name"
               value={lastName}
               onChange={(e) => setLastName(e.target.value)}
             />
@@ -110,6 +115,8 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
               id="new-email"
               type="email"
               required
+              maxLength={254}
+              placeholder="you@company.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
@@ -120,6 +127,8 @@ function CreateUserForm({ onCreated }: { onCreated: () => void }) {
               id="new-password"
               required
               minLength={8}
+              maxLength={72}
+              placeholder="At least 8 characters"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
@@ -156,6 +165,7 @@ function EditUserForm({
   const [role, setRole] = useState<AssignableRole>(user.role as AssignableRole);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const { showToast } = useToast();
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -163,6 +173,7 @@ function EditUserForm({
     setError(null);
     try {
       await patchJson(`/admin/users/${user.id}`, { firstName, lastName, role });
+      showToast("Changes saved.");
       onSaved();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to save changes.");
@@ -179,12 +190,14 @@ function EditUserForm({
       <div className="grid gap-3 sm:grid-cols-2">
         <Input
           required
+          maxLength={40}
           value={firstName}
           onChange={(e) => setFirstName(e.target.value)}
           placeholder="First name"
         />
         <Input
           required
+          maxLength={40}
           value={lastName}
           onChange={(e) => setLastName(e.target.value)}
           placeholder="Last name"
@@ -210,6 +223,7 @@ function UsersAdmin() {
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const { showToast } = useToast();
 
   function loadUsers() {
     apiFetch<User[]>("/admin/users")
@@ -230,6 +244,7 @@ function UsersAdmin() {
       await patchJson(`/admin/users/${user.id}/status`, {
         isActive: !user.isActive,
       });
+      showToast(user.isActive ? "User deactivated." : "User activated.");
       loadUsers();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to update status.");
@@ -250,6 +265,7 @@ function UsersAdmin() {
     setError(null);
     try {
       await deleteRequest(`/admin/users/${user.id}`);
+      showToast("User removed.");
       loadUsers();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to remove user.");
@@ -351,7 +367,13 @@ function UsersAdmin() {
                       disabled={busyId === u.id}
                       onClick={() => void toggleStatus(u)}
                     >
-                      {u.isActive ? "Deactivate" : "Activate"}
+                      {busyId === u.id
+                        ? u.isActive
+                          ? "Deactivating…"
+                          : "Activating…"
+                        : u.isActive
+                          ? "Deactivate"
+                          : "Activate"}
                     </Button>
                     <Button
                       variant="destructive"
@@ -359,7 +381,7 @@ function UsersAdmin() {
                       disabled={busyId === u.id}
                       onClick={() => void removeUser(u)}
                     >
-                      Remove
+                      {busyId === u.id ? "Removing…" : "Remove"}
                     </Button>
                   </div>
                 )}

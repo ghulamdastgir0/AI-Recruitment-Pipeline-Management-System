@@ -20,7 +20,7 @@ export function WarningToast({
   return (
     <div
       role="alert"
-      className="fixed left-1/2 top-6 z-50 w-full max-w-sm animate-[toast-in_0.25s_ease-out_forwards] rounded-xl border border-amber-500/40 bg-amber-950/95 px-4 py-3 text-center text-sm font-medium text-amber-200 shadow-xl backdrop-blur"
+      className="fixed left-1/2 top-6 z-50 w-full max-w-sm animate-[toast-in_0.25s_ease-out_forwards] rounded-xl border border-dark-warning-border/60 bg-dark-warning-bg/95 px-4 py-3 text-center text-sm font-medium text-dark-warning-text shadow-xl backdrop-blur"
     >
       {message}
     </div>

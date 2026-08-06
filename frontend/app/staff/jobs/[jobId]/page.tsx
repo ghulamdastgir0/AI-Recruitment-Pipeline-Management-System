@@ -17,6 +17,7 @@ import { InternalStatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input, Label, Textarea } from "@/components/ui/Input";
+import { Select } from "@/components/ui/Select";
 import {
   apiFetch,
   ApiError,
@@ -27,6 +28,7 @@ import {
   postJson,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useToast } from "@/lib/toast";
 
 interface JobPosting {
   id: string;
@@ -71,6 +73,7 @@ function EditJobForm({
   });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const { showToast } = useToast();
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -101,6 +104,7 @@ function EditJobForm({
           ? new Date(form.deadline).toISOString()
           : undefined,
       });
+      showToast("Job posting updated.");
       onSaved();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to save changes.");
@@ -117,6 +121,8 @@ function EditJobForm({
           <Input
             id="edit-title"
             required
+            maxLength={120}
+            placeholder="e.g. Senior Backend Engineer"
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })}
           />
@@ -126,6 +132,8 @@ function EditJobForm({
           <Textarea
             id="edit-description"
             required
+            maxLength={5000}
+            placeholder="Summarize the role, team, and impact"
             value={form.description}
             onChange={(e) => setForm({ ...form, description: e.target.value })}
             rows={5}
@@ -165,6 +173,8 @@ function EditJobForm({
             <Label htmlFor="edit-location">Location</Label>
             <Input
               id="edit-location"
+              maxLength={100}
+              placeholder="e.g. Remote — US"
               value={form.location}
               onChange={(e) => setForm({ ...form, location: e.target.value })}
             />
@@ -173,6 +183,7 @@ function EditJobForm({
             <Label htmlFor="edit-seniority">Seniority</Label>
             <Input
               id="edit-seniority"
+              maxLength={60}
               placeholder="e.g. Senior"
               value={form.seniority}
               onChange={(e) => setForm({ ...form, seniority: e.target.value })}
@@ -182,17 +193,16 @@ function EditJobForm({
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="edit-work-model">Work model</Label>
-            <select
+            <Select
               id="edit-work-model"
               value={form.workModel}
               onChange={(e) => setForm({ ...form, workModel: e.target.value })}
-              className="rounded-[var(--radius-control)] border border-border bg-white px-3 py-2 text-sm text-text-primary focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-100"
             >
               <option value="">Unspecified</option>
               <option value="REMOTE">Remote</option>
               <option value="HYBRID">Hybrid</option>
               <option value="ONSITE">Onsite</option>
-            </select>
+            </Select>
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="edit-salary-max">Salary cap</Label>
@@ -277,6 +287,7 @@ function HiringManagerPanel({
   const [assigned, setAssigned] = useState<Set<string> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const { showToast } = useToast();
 
   function load() {
     apiFetch<HiringManagerOption[]>("/users/hiring-managers")
@@ -310,6 +321,7 @@ function HiringManagerPanel({
           hiringManagerUserId: managerId,
         });
       }
+      showToast(isAssigned ? "Hiring manager removed." : "Hiring manager assigned.");
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Update failed.");
@@ -373,6 +385,8 @@ function JobDetail() {
   const [lifecycleError, setLifecycleError] = useState<string | null>(null);
   const [lifecycleBusy, setLifecycleBusy] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const { showToast } = useToast();
 
   const canManage = user?.role === "SUPER_ADMIN" || user?.role === "HR_ADMIN";
 
@@ -416,6 +430,7 @@ function JobDetail() {
     setPublishError(null);
     try {
       await postJson(`/job-postings/${jobId}/publish`, {});
+      showToast("Job posting published.");
       loadJob();
     } catch (err) {
       setPublishError(err instanceof ApiError ? err.message : "Publish failed.");
@@ -429,6 +444,7 @@ function JobDetail() {
     setLifecycleError(null);
     try {
       await postJson(`/job-postings/${jobId}/${action}`, {});
+      showToast(action === "pause" ? "Job posting paused." : "Job posting resumed.");
       loadJob();
     } catch (err) {
       setLifecycleError(
@@ -504,6 +520,25 @@ function JobDetail() {
           </h1>
           <InternalStatusBadge status={job.status} />
         </div>
+        <p className="mt-1 text-sm text-text-muted">
+          Application deadline:{" "}
+          <span
+            className={
+              (job.status === "PUBLISHED" || job.status === "PAUSED") &&
+              new Date(job.deadline).getTime() < new Date().getTime()
+                ? "font-medium text-warning-text"
+                : "font-medium text-text-secondary"
+            }
+          >
+            {Number.isNaN(new Date(job.deadline).getTime())
+              ? "Not set"
+              : new Date(job.deadline).toLocaleDateString(undefined, {
+                  year: "numeric",
+                  month: "short",
+                  day: "numeric",
+                })}
+          </span>
+        </p>
 
         {editing ? (
           <EditJobForm
@@ -592,29 +627,35 @@ function JobDetail() {
         <h2 className="mt-10 font-heading text-lg font-semibold text-text-primary">
           Candidates
         </h2>
-        <div className="mt-3 flex flex-wrap gap-3">
-          <select
-            value={minScore}
-            onChange={(event) => setMinScore(event.target.value)}
-            className="rounded-[var(--radius-control)] border border-border bg-white px-3 py-1.5 text-sm text-text-primary focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-100"
-          >
-            <option value="">Any score</option>
-            <option value="90">90+</option>
-            <option value="80">80+</option>
-            <option value="70">70+</option>
-            <option value="50">50+</option>
-          </select>
-          <select
-            value={recommendation}
-            onChange={(event) => setRecommendation(event.target.value)}
-            className="rounded-[var(--radius-control)] border border-border bg-white px-3 py-1.5 text-sm text-text-primary focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-100"
-          >
-            <option value="">Any recommendation</option>
-            <option value="STRONG_MATCH">Strong match</option>
-            <option value="POTENTIAL_MATCH">Potential match</option>
-            <option value="NEEDS_REVIEW">Needs review</option>
-            <option value="INSUFFICIENT_EVIDENCE">Insufficient evidence</option>
-          </select>
+        <div className="mt-3 flex flex-wrap items-end gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="candidate-min-score">Min. score</Label>
+            <Select
+              id="candidate-min-score"
+              value={minScore}
+              onChange={(event) => setMinScore(event.target.value)}
+            >
+              <option value="">Any score</option>
+              <option value="90">90+</option>
+              <option value="80">80+</option>
+              <option value="70">70+</option>
+              <option value="50">50+</option>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="candidate-recommendation">Recommendation</Label>
+            <Select
+              id="candidate-recommendation"
+              value={recommendation}
+              onChange={(event) => setRecommendation(event.target.value)}
+            >
+              <option value="">Any recommendation</option>
+              <option value="STRONG_MATCH">Strong match</option>
+              <option value="POTENTIAL_MATCH">Potential match</option>
+              <option value="NEEDS_REVIEW">Needs review</option>
+              <option value="INSUFFICIENT_EVIDENCE">Insufficient evidence</option>
+            </Select>
+          </div>
         </div>
         {candidates?.length === 0 && (
           <div className="mt-3">
@@ -641,15 +682,28 @@ function JobDetail() {
                   <InternalStatusBadge status={candidate.applicationStatus} />
                   <Button
                     variant="secondary"
-                    onClick={() =>
-                      void downloadFile(
-                        `/job-postings/${jobId}/candidates/${candidate.candidateProfileId}/cv`,
-                        `${candidate.candidateName ?? candidate.candidateProfileId}.pdf`,
-                      )
-                    }
+                    disabled={downloadingId === candidate.applicationId}
+                    onClick={async () => {
+                      setDownloadingId(candidate.applicationId);
+                      try {
+                        await downloadFile(
+                          `/job-postings/${jobId}/candidates/${candidate.candidateProfileId}/cv`,
+                          `${candidate.candidateName ?? candidate.candidateProfileId}.pdf`,
+                        );
+                      } catch (err) {
+                        showToast(
+                          err instanceof ApiError ? err.message : "Failed to download CV.",
+                          "danger",
+                        );
+                      } finally {
+                        setDownloadingId(null);
+                      }
+                    }}
                     className="px-2.5 py-1 text-xs"
                   >
-                    Download CV
+                    {downloadingId === candidate.applicationId
+                      ? "Downloading…"
+                      : "Download CV"}
                   </Button>
                 </div>
               </div>

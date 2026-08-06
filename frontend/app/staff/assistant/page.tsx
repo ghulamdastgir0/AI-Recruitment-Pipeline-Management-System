@@ -222,6 +222,7 @@ function AssistantChat() {
               value={input}
               onChange={(event) => setInput(event.target.value)}
               placeholder="Message the assistant…"
+              maxLength={4000}
               className="flex-1"
             />
             <Button type="submit" disabled={sending || !input.trim()}>

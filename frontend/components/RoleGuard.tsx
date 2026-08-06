@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
 import { type Role, useAuth } from "@/lib/auth";
+import { LoadingState } from "@/components/AsyncState";
 
 /**
  * Gates a /staff/* page: redirects to /login until a session exists, and
@@ -30,7 +31,7 @@ export function RoleGuard({
   }, [ready, user, roles, router]);
 
   if (!ready || !user || (roles && !roles.includes(user.role))) {
-    return <p className="p-6 text-sm text-gray-500">Loading…</p>;
+    return <LoadingState />;
   }
 
   return <>{children}</>;

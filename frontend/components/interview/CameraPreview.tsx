@@ -36,7 +36,7 @@ export function CameraPreview({
         className="h-28 w-40 scale-x-[-1] object-cover"
       />
       <span className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white">
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-green-400" />
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-dark-success-text" />
         Monitoring
       </span>
     </div>

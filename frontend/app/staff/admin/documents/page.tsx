@@ -16,6 +16,7 @@ import {
   patchJson,
   postForm,
 } from "@/lib/api";
+import { useToast } from "@/lib/toast";
 
 interface CompanyDocument {
   id: string;
@@ -33,6 +34,7 @@ function UploadDocumentForm({ onUploaded }: { onUploaded: () => void }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const { showToast } = useToast();
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -50,6 +52,7 @@ function UploadDocumentForm({ onUploaded }: { onUploaded: () => void }) {
       await postForm("/admin/documents", form);
       setName("");
       if (fileRef.current) fileRef.current.value = "";
+      showToast("Document uploaded.");
       onUploaded();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to upload document.");
@@ -66,6 +69,7 @@ function UploadDocumentForm({ onUploaded }: { onUploaded: () => void }) {
           <Input
             id="doc-name"
             required
+            maxLength={150}
             placeholder="Company Handbook"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -105,6 +109,7 @@ function UploadVersionButton({
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { showToast } = useToast();
 
   async function handleChange() {
     const file = fileRef.current?.files?.[0];
@@ -115,6 +120,7 @@ function UploadVersionButton({
       const form = new FormData();
       form.append("file", file);
       await postForm(`/admin/documents/${documentId}/versions`, form);
+      showToast("New version uploaded.");
       onUploaded();
     } catch (err) {
       setError(
@@ -149,6 +155,9 @@ function DocumentsAdmin() {
   const [error, setError] = useState<string | null>(null);
   const [showUpload, setShowUpload] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<"toggle" | "delete" | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const { showToast } = useToast();
 
   function loadDocuments() {
     apiFetch<CompanyDocument[]>("/admin/documents")
@@ -164,16 +173,21 @@ function DocumentsAdmin() {
 
   async function toggleStatus(doc: CompanyDocument) {
     setBusyId(doc.id);
-    setError(null);
+    setBusyAction("toggle");
     try {
       await patchJson(`/admin/documents/${doc.id}/status`, {
         status: doc.status === "ACTIVE" ? "INACTIVE" : "ACTIVE",
       });
+      showToast(doc.status === "ACTIVE" ? "Document deactivated." : "Document activated.");
       loadDocuments();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to update status.");
+      showToast(
+        err instanceof ApiError ? err.message : "Failed to update status.",
+        "danger",
+      );
     } finally {
       setBusyId(null);
+      setBusyAction(null);
     }
   }
 
@@ -186,14 +200,19 @@ function DocumentsAdmin() {
       return;
     }
     setBusyId(doc.id);
-    setError(null);
+    setBusyAction("delete");
     try {
       await deleteRequest(`/admin/documents/${doc.id}`);
+      showToast("Document deleted.");
       loadDocuments();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to delete document.");
+      showToast(
+        err instanceof ApiError ? err.message : "Failed to delete document.",
+        "danger",
+      );
     } finally {
       setBusyId(null);
+      setBusyAction(null);
     }
   }
 
@@ -266,14 +285,25 @@ function DocumentsAdmin() {
                 <Button
                   variant="secondary"
                   className="px-2.5 py-1 text-xs"
-                  onClick={() =>
-                    void downloadFile(
-                      `/admin/documents/${doc.id}/file`,
-                      doc.originalFileName,
-                    )
-                  }
+                  disabled={downloadingId === doc.id}
+                  onClick={async () => {
+                    setDownloadingId(doc.id);
+                    try {
+                      await downloadFile(
+                        `/admin/documents/${doc.id}/file`,
+                        doc.originalFileName,
+                      );
+                    } catch (err) {
+                      showToast(
+                        err instanceof ApiError ? err.message : "Failed to download file.",
+                        "danger",
+                      );
+                    } finally {
+                      setDownloadingId(null);
+                    }
+                  }}
                 >
-                  Download
+                  {downloadingId === doc.id ? "Downloading…" : "Download"}
                 </Button>
                 {(doc.status === "ACTIVE" || doc.status === "INACTIVE") && (
                   <Button
@@ -282,7 +312,13 @@ function DocumentsAdmin() {
                     disabled={busyId === doc.id}
                     onClick={() => void toggleStatus(doc)}
                   >
-                    {doc.status === "ACTIVE" ? "Deactivate" : "Activate"}
+                    {busyId === doc.id && busyAction === "toggle"
+                      ? doc.status === "ACTIVE"
+                        ? "Deactivating…"
+                        : "Activating…"
+                      : doc.status === "ACTIVE"
+                        ? "Deactivate"
+                        : "Activate"}
                   </Button>
                 )}
                 <UploadVersionButton
@@ -296,7 +332,9 @@ function DocumentsAdmin() {
                     disabled={busyId === doc.id}
                     onClick={() => void handleDelete(doc)}
                   >
-                    Delete
+                    {busyId === doc.id && busyAction === "delete"
+                      ? "Deleting…"
+                      : "Delete"}
                   </Button>
                 )}
               </div>

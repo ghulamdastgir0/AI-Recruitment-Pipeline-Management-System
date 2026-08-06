@@ -3,10 +3,14 @@ export const API_BASE_URL =
 
 export class ApiError extends Error {
   status: number;
+  /** Parsed JSON error body, when the response had one — for endpoints that
+   *  attach extra fields (e.g. an existing record's id) beyond `message`. */
+  body: unknown;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, body?: unknown) {
     super(message);
     this.status = status;
+    this.body = body;
     this.name = "ApiError";
   }
 }
@@ -34,8 +38,9 @@ export async function apiFetch<T>(
 
   if (!response.ok) {
     let message = response.statusText || `Request failed (${response.status})`;
+    let body: unknown;
     try {
-      const body: unknown = await response.json();
+      body = await response.json();
       if (body && typeof body === "object" && "message" in body) {
         const raw = (body as { message: unknown }).message;
         message = Array.isArray(raw) ? raw.join(", ") : String(raw);
@@ -43,7 +48,7 @@ export async function apiFetch<T>(
     } catch {
       // non-JSON error body — keep the status text fallback
     }
-    throw new ApiError(response.status, message);
+    throw new ApiError(response.status, message, body);
   }
 
   if (response.status === 204) return undefined as T;

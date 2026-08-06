@@ -8,9 +8,24 @@
   --color-brand-50: #eef3ff;
   --color-brand-100: #dce6fe;
   --color-brand-200: #b9ccfd;
+  --color-brand-300: #93b2fb;
+  --color-brand-400: #628df5;
   --color-brand-500: #3b6ff0;
   --color-brand-600: #2563eb;
   --color-brand-700: #1d4ed8;
+  --color-brand-800: #1e3fae;
+  --color-brand-900: #1b3489;
+
+  /* Accent (secondary palette for visual variety) */
+  --color-accent-violet: #7c3aed;
+  --color-accent-violet-soft: #f1e8fe;
+  --color-accent-violet-text: #6d28d9;
+  --color-accent-teal: #0d9488;
+  --color-accent-teal-soft: #d9f5f1;
+  --color-accent-teal-text: #0f766e;
+  --color-accent-amber: #d97706;
+  --color-accent-amber-soft: #fef3c7;
+  --color-accent-amber-text: #92400e;
 
   /* Neutrals */
   --color-surface: #f7f8fb;
@@ -33,6 +48,30 @@
   --color-info-soft: var(--color-brand-50);
   --color-info-text: var(--color-brand-700);
 
+  /* Dark theme (proctored interview call screen) */
+  --color-dark-bg: #030712;
+  --color-dark-surface: #111827;
+  --color-dark-border: #1f2937;
+  --color-dark-text: #ffffff;
+  --color-dark-text-secondary: #e5e7eb;
+  --color-dark-text-muted: #9ca3af;
+  --color-dark-text-subtle: #6b7280;
+
+  --color-dark-danger-bg: #450a0a;
+  --color-dark-danger-border: #991b1b;
+  --color-dark-danger-text: #fca5a5;
+
+  --color-dark-warning-bg: #451a03;
+  --color-dark-warning-border: #92400e;
+  --color-dark-warning-text: #fcd34d;
+  --color-dark-warning-solid: #d97706;
+  --color-dark-warning-solid-hover: #b45309;
+
+  --color-dark-success-bg: #052e16;
+  --color-dark-success-border: #166534;
+  --color-dark-success-text: #86efac;
+  --color-dark-success-text-secondary: #bbf7d0;
+
   /* Shape */
   --radius-card: 16px;
   --radius-control: 10px;
@@ -47,9 +86,46 @@
   --color-brand-50: var(--color-brand-50);
   --color-brand-100: var(--color-brand-100);
   --color-brand-200: var(--color-brand-200);
+  --color-brand-300: var(--color-brand-300);
+  --color-brand-400: var(--color-brand-400);
   --color-brand-500: var(--color-brand-500);
   --color-brand-600: var(--color-brand-600);
   --color-brand-700: var(--color-brand-700);
+  --color-brand-800: var(--color-brand-800);
+  --color-brand-900: var(--color-brand-900);
+
+  --color-accent-violet: var(--color-accent-violet);
+  --color-accent-violet-soft: var(--color-accent-violet-soft);
+  --color-accent-violet-text: var(--color-accent-violet-text);
+  --color-accent-teal: var(--color-accent-teal);
+  --color-accent-teal-soft: var(--color-accent-teal-soft);
+  --color-accent-teal-text: var(--color-accent-teal-text);
+  --color-accent-amber: var(--color-accent-amber);
+  --color-accent-amber-soft: var(--color-accent-amber-soft);
+  --color-accent-amber-text: var(--color-accent-amber-text);
+
+  --color-dark-bg: var(--color-dark-bg);
+  --color-dark-surface: var(--color-dark-surface);
+  --color-dark-border: var(--color-dark-border);
+  --color-dark-text: var(--color-dark-text);
+  --color-dark-text-secondary: var(--color-dark-text-secondary);
+  --color-dark-text-muted: var(--color-dark-text-muted);
+  --color-dark-text-subtle: var(--color-dark-text-subtle);
+
+  --color-dark-danger-bg: var(--color-dark-danger-bg);
+  --color-dark-danger-border: var(--color-dark-danger-border);
+  --color-dark-danger-text: var(--color-dark-danger-text);
+
+  --color-dark-warning-bg: var(--color-dark-warning-bg);
+  --color-dark-warning-border: var(--color-dark-warning-border);
+  --color-dark-warning-text: var(--color-dark-warning-text);
+  --color-dark-warning-solid: var(--color-dark-warning-solid);
+  --color-dark-warning-solid-hover: var(--color-dark-warning-solid-hover);
+
+  --color-dark-success-bg: var(--color-dark-success-bg);
+  --color-dark-success-border: var(--color-dark-success-border);
+  --color-dark-success-text: var(--color-dark-success-text);
+  --color-dark-success-text-secondary: var(--color-dark-success-text-secondary);
 
   --color-surface: var(--color-surface);
   --color-surface-card: var(--color-surface-card);

@@ -54,6 +54,7 @@ export default function InterviewPage() {
   const [submitting, setSubmitting] = useState(false);
   const [listening, setListening] = useState(false);
   const [stalled, setStalled] = useState(false);
+  const [joining, setJoining] = useState(false);
 
   const monitoring = useInterviewMonitoring(applicationId, videoEl, started);
 
@@ -112,18 +113,24 @@ export default function InterviewPage() {
   }
 
   async function startInterview() {
+    if (joining) return;
+    setJoining(true);
     setCameraError(null);
     setMicrophoneError(null);
-    const media = await requestCameraAndMic();
-    if (!media.stream) {
-      setCameraError(media.cameraError ?? null);
-      setMicrophoneError(media.microphoneError ?? null);
-      return;
+    try {
+      const media = await requestCameraAndMic();
+      if (!media.stream) {
+        setCameraError(media.cameraError ?? null);
+        setMicrophoneError(media.microphoneError ?? null);
+        return;
+      }
+      streamRef.current = media.stream;
+      setStream(media.stream);
+      setAudioOnlyStream(new MediaStream(media.stream.getAudioTracks()));
+      setStarted(true);
+    } finally {
+      setJoining(false);
     }
-    streamRef.current = media.stream;
-    setStream(media.stream);
-    setAudioOnlyStream(new MediaStream(media.stream.getAudioTracks()));
-    setStarted(true);
   }
 
   const handleVideoReady = useCallback((video: HTMLVideoElement | null) => {
@@ -190,31 +197,34 @@ export default function InterviewPage() {
 
   if (!started) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-gray-950 p-6">
-        <div className="flex w-full max-w-md flex-col gap-4 rounded-2xl border border-gray-800 bg-gray-900 p-6">
-          <h1 className="text-xl font-semibold text-white">
+      <main className="flex min-h-screen items-center justify-center bg-dark-bg p-6">
+        <div className="flex w-full max-w-md flex-col gap-4 rounded-2xl border border-dark-border bg-dark-surface p-6">
+          <h1 className="text-xl font-semibold text-dark-text">
             AI Technical Interview
           </h1>
-          <p className="text-sm text-gray-400">
+          <p className="text-sm text-dark-text-muted">
             This is a live conversation — the interview begins as soon as you
             join. Just speak your answers naturally; if you go quiet for 10
             seconds, your answer is submitted automatically and the next
             question follows. No buttons to press.
           </p>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-dark-text-subtle">
             This interview is proctored: your camera stays on, the tab must
             stay in focus and fullscreen, and the session ends automatically
             after repeated warnings.
           </p>
-          {cameraError && <p className="text-sm text-red-400">{cameraError}</p>}
+          {cameraError && (
+            <p className="text-sm text-dark-danger-text">{cameraError}</p>
+          )}
           {microphoneError && (
-            <p className="text-sm text-red-400">{microphoneError}</p>
+            <p className="text-sm text-dark-danger-text">{microphoneError}</p>
           )}
           <button
             onClick={() => void startInterview()}
-            className="self-start rounded-full bg-brand-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-brand-500"
+            disabled={joining}
+            className="self-start rounded-full bg-brand-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:bg-brand-600/50"
           >
-            Join Interview
+            {joining ? "Joining…" : "Join Interview"}
           </button>
         </div>
       </main>
@@ -222,8 +232,8 @@ export default function InterviewPage() {
   }
 
   return (
-    <main className="flex min-h-screen flex-col bg-gray-950 text-white">
-      <div className="flex items-center justify-between px-6 py-4 text-sm text-gray-400">
+    <main className="flex min-h-screen flex-col bg-dark-bg text-dark-text">
+      <div className="flex items-center justify-between px-6 py-4 text-sm text-dark-text-muted">
         <span>{connected ? "Connected" : "Connecting…"}</span>
         <div className="flex items-center gap-3">
           {question && <span>Question {question.sequenceOrder}</span>}
@@ -233,19 +243,19 @@ export default function InterviewPage() {
       </div>
 
       {error && (
-        <p className="mx-6 rounded-lg border border-red-800 bg-red-950 p-3 text-sm text-red-300">
+        <p className="mx-6 rounded-lg border border-dark-danger-border bg-dark-danger-bg p-3 text-sm text-dark-danger-text">
           {error}
         </p>
       )}
 
       {monitoring.fullscreenLost && !result && (
-        <div className="mx-6 flex items-center justify-between rounded-lg border border-amber-800 bg-amber-950 p-3">
-          <p className="text-sm text-amber-300">
+        <div className="mx-6 flex items-center justify-between rounded-lg border border-dark-warning-border bg-dark-warning-bg p-3">
+          <p className="text-sm text-dark-warning-text">
             Please return to fullscreen to continue your interview.
           </p>
           <button
             onClick={monitoring.requestFullscreenAgain}
-            className="rounded bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-500"
+            className="rounded bg-dark-warning-solid px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-dark-warning-solid-hover"
           >
             Return to fullscreen
           </button>
@@ -262,14 +272,14 @@ export default function InterviewPage() {
 
       <div className="flex flex-1 flex-col items-center justify-center gap-8 px-6 pb-24">
         {result ? (
-          <div className="flex w-full max-w-md flex-col gap-3 rounded-2xl border border-green-800 bg-green-950 p-6 text-center">
-            <h2 className="text-lg font-semibold text-green-300">
+          <div className="flex w-full max-w-md flex-col gap-3 rounded-2xl border border-dark-success-border bg-dark-success-bg p-6 text-center">
+            <h2 className="text-lg font-semibold text-dark-success-text">
               Interview Complete
             </h2>
-            <p className="text-sm text-green-200">{result.message}</p>
+            <p className="text-sm text-dark-success-text-secondary">{result.message}</p>
             <button
               onClick={() => router.push(`/status/${applicationId}`)}
-              className="mx-auto mt-2 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-brand-500"
+              className="mx-auto mt-2 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-700"
             >
               Back to status
             </button>
@@ -278,7 +288,7 @@ export default function InterviewPage() {
           <>
             <CircularVoiceVisualizer stream={stream} active={listening} />
 
-            <p className="max-w-xl text-center text-lg text-gray-100">
+            <p className="max-w-xl text-center text-lg text-dark-text-secondary">
               {question.questionText}
             </p>
 
@@ -297,18 +307,19 @@ export default function InterviewPage() {
                 onAutoSubmit={sendAnswer}
               />
               {submitting && !stalled && (
-                <p className="mt-2 text-center text-sm text-gray-400">
+                <p className="mt-2 flex items-center justify-center gap-2 text-center text-sm text-dark-text-muted">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-brand-500" />
                   Submitting your answer…
                 </p>
               )}
               {stalled && (
-                <div className="mt-2 rounded-lg border border-amber-800 bg-amber-950 p-3">
-                  <p className="text-sm text-amber-300">
+                <div className="mt-2 rounded-lg border border-dark-warning-border bg-dark-warning-bg p-3">
+                  <p className="text-sm text-dark-warning-text">
                     That&apos;s taking longer than expected.
                   </p>
                   <button
                     onClick={retrySend}
-                    className="mt-2 rounded bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-500"
+                    className="mt-2 rounded bg-dark-warning-solid px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-dark-warning-solid-hover"
                   >
                     Retry
                   </button>
@@ -319,7 +330,7 @@ export default function InterviewPage() {
         ) : (
           <>
             <CircularVoiceVisualizer stream={stream} active={false} />
-            <p className="text-gray-400">Waiting for the first question…</p>
+            <p className="text-dark-text-muted">Waiting for the first question…</p>
           </>
         )}
       </div>

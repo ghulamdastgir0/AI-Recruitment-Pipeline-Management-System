@@ -27,6 +27,7 @@ export function AudioRecorder({
 }) {
   const [error, setError] = useState<string | null>(null);
   const [silenceMs, setSilenceMs] = useState(0);
+  const [submitted, setSubmitted] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -39,6 +40,7 @@ export function AudioRecorder({
     if (!active || !stream) return;
 
     submittedRef.current = false;
+    queueMicrotask(() => setSubmitted(false));
 
     let recorder: MediaRecorder;
     try {
@@ -126,6 +128,7 @@ export function AudioRecorder({
   function submitNow() {
     if (submittedRef.current) return;
     submittedRef.current = true;
+    setSubmitted(true);
     if (tickIntervalRef.current !== null) clearInterval(tickIntervalRef.current);
     recorderRef.current?.stop();
   }
@@ -137,10 +140,10 @@ export function AudioRecorder({
 
   return (
     <div className="flex flex-col items-center gap-3">
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-dark-danger-text">{error}</p>}
       <div className="flex items-center gap-2">
-        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-blue-500" />
-        <p className="text-sm text-gray-400">
+        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-brand-500" />
+        <p className="text-sm text-dark-text-muted">
           {showCountdown
             ? `Listening… submitting in ${secondsLeft}s`
             : "Listening…"}
@@ -149,9 +152,10 @@ export function AudioRecorder({
       <button
         type="button"
         onClick={submitNow}
-        className="rounded-full bg-gray-800 px-4 py-2 text-xs font-medium text-gray-200 hover:bg-gray-700"
+        disabled={submitted}
+        className="rounded-full border border-dark-border bg-dark-surface px-4 py-2 text-xs font-medium text-dark-text-secondary transition-colors hover:bg-dark-border disabled:cursor-not-allowed disabled:opacity-50"
       >
-        Submit now
+        {submitted ? "Submitted" : "Submit now"}
       </button>
     </div>
   );

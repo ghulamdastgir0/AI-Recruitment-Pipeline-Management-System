@@ -31,7 +31,7 @@ export default function LoginPage() {
 
   return (
     <main className="grid min-h-screen grid-cols-1 md:grid-cols-2">
-      <div className="hidden flex-col justify-between bg-brand-600 p-12 text-white md:flex">
+      <div className="hidden flex-col justify-between bg-gradient-to-br from-brand-900 via-brand-700 to-accent-violet p-12 text-white md:flex">
         <div className="flex items-center gap-2">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/15 text-sm font-bold">
             AI
@@ -71,6 +71,7 @@ export default function LoginPage() {
                 type="email"
                 placeholder="you@company.com"
                 required
+                maxLength={254}
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
               />
@@ -82,6 +83,7 @@ export default function LoginPage() {
                 type="password"
                 placeholder="••••••••"
                 required
+                maxLength={72}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
               />

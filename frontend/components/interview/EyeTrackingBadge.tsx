@@ -22,7 +22,7 @@ export function EyeTrackingBadge({
   if (!modelsReady) {
     return (
       <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/60 px-3 py-1.5 text-xs font-medium text-white backdrop-blur">
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-dark-warning-text" />
         <span>Starting face/eye monitoring…</span>
       </div>
     );
@@ -38,7 +38,7 @@ export function EyeTrackingBadge({
       <span className="text-white/50">·</span>
       <span>Eyes: {eyesLabel}</span>
       <span className="text-white/50">·</span>
-      <span className={state.direction === "CENTER" ? "text-white/70" : "text-amber-300"}>
+      <span className={state.direction === "CENTER" ? "text-white/70" : "text-dark-warning-text"}>
         Direction: {DIRECTION_LABEL[state.direction]}
       </span>
     </div>

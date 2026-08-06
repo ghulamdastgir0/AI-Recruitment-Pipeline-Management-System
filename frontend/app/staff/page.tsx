@@ -12,14 +12,28 @@ import { Card } from "@/components/ui/Card";
 import { Input, Label, Textarea } from "@/components/ui/Input";
 import { apiFetch, ApiError, deleteRequest, postJson } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useToast } from "@/lib/toast";
+
+const today = () => new Date().toISOString().slice(0, 10);
 
 interface JobPosting {
   id: string;
   title: string;
   status: string;
+  deadline: string;
   location?: string | null;
   seniority?: string | null;
   workModel?: string | null;
+}
+
+function formatDeadline(deadline: string): string {
+  const date = new Date(deadline);
+  if (Number.isNaN(date.getTime())) return "Not set";
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 interface CreatedJob {
@@ -39,6 +53,7 @@ function CreateJobForm({ onCreated }: { onCreated: (jobId: string) => void }) {
   });
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const { showToast } = useToast();
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -59,6 +74,7 @@ function CreateJobForm({ onCreated }: { onCreated: (jobId: string) => void }) {
         deadline: new Date(form.deadline).toISOString(),
         location: form.location || undefined,
       });
+      showToast("Job posting created.");
       onCreated(created.id);
     } catch (err) {
       setError(
@@ -77,6 +93,7 @@ function CreateJobForm({ onCreated }: { onCreated: (jobId: string) => void }) {
           <Input
             id="job-title"
             required
+            maxLength={120}
             placeholder="Senior Backend Engineer"
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })}
@@ -87,6 +104,7 @@ function CreateJobForm({ onCreated }: { onCreated: (jobId: string) => void }) {
           <Textarea
             id="job-prompt"
             required
+            maxLength={5000}
             placeholder="Used to draft the posting"
             value={form.rawPrompt}
             onChange={(e) => setForm({ ...form, rawPrompt: e.target.value })}
@@ -98,6 +116,7 @@ function CreateJobForm({ onCreated }: { onCreated: (jobId: string) => void }) {
             <Label htmlFor="required-skills">Required skills</Label>
             <Input
               id="required-skills"
+              maxLength={500}
               placeholder="Comma-separated"
               value={form.requiredSkills}
               onChange={(e) => setForm({ ...form, requiredSkills: e.target.value })}
@@ -107,6 +126,7 @@ function CreateJobForm({ onCreated }: { onCreated: (jobId: string) => void }) {
             <Label htmlFor="preferred-skills">Preferred skills</Label>
             <Input
               id="preferred-skills"
+              maxLength={500}
               placeholder="Comma-separated"
               value={form.preferredSkills}
               onChange={(e) => setForm({ ...form, preferredSkills: e.target.value })}
@@ -144,6 +164,7 @@ function CreateJobForm({ onCreated }: { onCreated: (jobId: string) => void }) {
               id="deadline"
               required
               type="date"
+              min={today()}
               value={form.deadline}
               onChange={(e) => setForm({ ...form, deadline: e.target.value })}
             />
@@ -152,6 +173,7 @@ function CreateJobForm({ onCreated }: { onCreated: (jobId: string) => void }) {
             <Label htmlFor="location">Location</Label>
             <Input
               id="location"
+              maxLength={100}
               placeholder="Lahore, Pakistan"
               value={form.location}
               onChange={(e) => setForm({ ...form, location: e.target.value })}
@@ -174,7 +196,11 @@ function StaffDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [busyJobId, setBusyJobId] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<"pause" | "resume" | "delete" | null>(
+    null,
+  );
   const [search, setSearch] = useState("");
+  const { showToast } = useToast();
 
   function loadJobs(query: string) {
     const params = new URLSearchParams();
@@ -199,14 +225,19 @@ function StaffDashboard() {
 
   async function pauseOrResume(jobId: string, action: "pause" | "resume") {
     setBusyJobId(jobId);
-    setError(null);
+    setBusyAction(action);
     try {
       await postJson(`/job-postings/${jobId}/${action}`, {});
+      showToast(action === "pause" ? "Job posting paused." : "Job posting resumed.");
       loadJobs(search);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : `Failed to ${action} job.`);
+      showToast(
+        err instanceof ApiError ? err.message : `Failed to ${action} job.`,
+        "danger",
+      );
     } finally {
       setBusyJobId(null);
+      setBusyAction(null);
     }
   }
 
@@ -219,14 +250,16 @@ function StaffDashboard() {
       return;
     }
     setBusyJobId(jobId);
-    setError(null);
+    setBusyAction("delete");
     try {
       await deleteRequest(`/job-postings/${jobId}`);
+      showToast("Job posting deleted.");
       loadJobs(search);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to delete job.");
+      showToast(err instanceof ApiError ? err.message : "Failed to delete job.", "danger");
     } finally {
       setBusyJobId(null);
+      setBusyAction(null);
     }
   }
 
@@ -305,6 +338,19 @@ function StaffDashboard() {
                   .filter(Boolean)
                   .join(" · ") || "No location specified"}
               </p>
+              <p className="mt-1 text-sm text-text-muted">
+                Deadline:{" "}
+                <span
+                  className={
+                    (job.status === "PUBLISHED" || job.status === "PAUSED") &&
+                    new Date(job.deadline).getTime() < new Date().getTime()
+                      ? "font-medium text-warning-text"
+                      : "font-medium text-text-secondary"
+                  }
+                >
+                  {formatDeadline(job.deadline)}
+                </span>
+              </p>
               {canManage && (
                 <div className="mt-3 flex items-center gap-2">
                   {job.status === "PUBLISHED" && (
@@ -314,7 +360,9 @@ function StaffDashboard() {
                       disabled={busyJobId === job.id}
                       className="px-2.5 py-1 text-xs"
                     >
-                      Pause
+                      {busyJobId === job.id && busyAction === "pause"
+                        ? "Pausing…"
+                        : "Pause"}
                     </Button>
                   )}
                   {job.status === "PAUSED" && (
@@ -324,7 +372,9 @@ function StaffDashboard() {
                       disabled={busyJobId === job.id}
                       className="px-2.5 py-1 text-xs"
                     >
-                      Resume
+                      {busyJobId === job.id && busyAction === "resume"
+                        ? "Resuming…"
+                        : "Resume"}
                     </Button>
                   )}
                   <Button
@@ -333,7 +383,9 @@ function StaffDashboard() {
                     disabled={busyJobId === job.id}
                     className="px-2.5 py-1 text-xs"
                   >
-                    Delete
+                    {busyJobId === job.id && busyAction === "delete"
+                      ? "Deleting…"
+                      : "Delete"}
                   </Button>
                 </div>
               )}
