@@ -25,7 +25,7 @@ function SkillTags({ label, skills }: { label: string; skills: string[] }) {
         {skills.map((skill) => (
           <span
             key={skill}
-            className="rounded-full bg-black/5 px-2.5 py-0.5 text-xs text-text-secondary"
+            className="rounded-full bg-surface-muted px-2.5 py-0.5 text-xs text-text-secondary"
           >
             {skill}
           </span>

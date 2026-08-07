@@ -206,7 +206,7 @@ export default function HomePage() {
                       </span>
                     )}
                     {job.location && (
-                      <span className="rounded-full bg-black/5 px-2.5 py-0.5 text-xs font-medium text-text-secondary">
+                      <span className="rounded-full bg-surface-muted px-2.5 py-0.5 text-xs font-medium text-text-secondary">
                         {job.location}
                       </span>
                     )}

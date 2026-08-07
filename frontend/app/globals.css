@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 :root {
   --background: #f7f8fb;
   --foreground: #111827;
@@ -30,6 +32,8 @@
   /* Neutrals */
   --color-surface: #f7f8fb;
   --color-surface-card: #ffffff;
+  --color-surface-muted: rgba(0, 0, 0, 0.05);
+  --color-surface-sunken: #eef0f4;
   --color-border: #e5e7eb;
   --color-text-primary: #111827;
   --color-text-secondary: #4b5563;
@@ -75,6 +79,56 @@
   /* Shape */
   --radius-card: 16px;
   --radius-control: 10px;
+}
+
+/* App-wide dark theme (light/dark/system toggle) — distinct from the
+   always-dark `--color-dark-*` set above, which is hardcoded onto the
+   proctored interview screen regardless of this toggle. */
+:root[data-theme="dark"] {
+  --background: #0b0f19;
+  --foreground: #f3f4f6;
+
+  --color-brand-50: #16233d;
+  --color-brand-100: #1b2b4c;
+  --color-brand-200: #24365e;
+  --color-brand-300: #2f4a86;
+  --color-brand-400: #5b8bf0;
+  --color-brand-500: #4f7df5;
+  --color-brand-600: #3b82f6;
+  --color-brand-700: #93b2fb;
+  --color-brand-800: #b9ccfd;
+  --color-brand-900: #dce6fe;
+
+  --color-accent-violet: #a78bfa;
+  --color-accent-violet-soft: #241b47;
+  --color-accent-violet-text: #c4b5fd;
+  --color-accent-teal: #2dd4bf;
+  --color-accent-teal-soft: #0f2c29;
+  --color-accent-teal-text: #5eead4;
+  --color-accent-amber: #fbbf24;
+  --color-accent-amber-soft: #3a2a0e;
+  --color-accent-amber-text: #fcd34d;
+
+  --color-surface: #0b0f19;
+  --color-surface-card: #111827;
+  --color-surface-muted: rgba(255, 255, 255, 0.06);
+  --color-surface-sunken: #0a0e17;
+  --color-border: #1f2937;
+  --color-text-primary: #f3f4f6;
+  --color-text-secondary: #9ca3af;
+  --color-text-muted: #6b7280;
+
+  --color-success: #22c55e;
+  --color-success-soft: #052e16;
+  --color-success-text: #86efac;
+  --color-warning: #f59e0b;
+  --color-warning-soft: #3a2a0e;
+  --color-warning-text: #fcd34d;
+  --color-danger: #f87171;
+  --color-danger-soft: #3f1414;
+  --color-danger-text: #fca5a5;
+  --color-info-soft: var(--color-brand-50);
+  --color-info-text: var(--color-brand-700);
 }
 
 @theme inline {
@@ -129,6 +183,8 @@
 
   --color-surface: var(--color-surface);
   --color-surface-card: var(--color-surface-card);
+  --color-surface-muted: var(--color-surface-muted);
+  --color-surface-sunken: var(--color-surface-sunken);
   --color-border: var(--color-border);
   --color-text-primary: var(--color-text-primary);
   --color-text-secondary: var(--color-text-secondary);
@@ -154,6 +210,7 @@ body {
   background: var(--color-surface);
   color: var(--color-text-primary);
   font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 h1,

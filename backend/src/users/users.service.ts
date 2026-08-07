@@ -3,11 +3,14 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { AuditLogService } from '../audit/audit-log.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
 const SALT_ROUNDS = 12;
@@ -191,6 +194,63 @@ export class UsersService {
       resourceId: id,
     });
     return result;
+  }
+
+  /**
+   * Self-service profile read — any authenticated role (including
+   * SUPER_ADMIN, which UsersService.update() deliberately can't touch since
+   * that path is for HR Admins/Hiring Managers only).
+   */
+  async getOwnProfile(id: string): Promise<UserView> {
+    const user = await this.getUserOrThrow(id);
+    return toView(user);
+  }
+
+  /**
+   * Self-service name edit. Unlike update(), never blocks SUPER_ADMIN (a
+   * user editing their own profile is always allowed) and never accepts a
+   * role change (nobody can promote themselves).
+   */
+  async updateOwnProfile(id: string, dto: UpdateProfileDto): Promise<UserView> {
+    const user = await this.prisma.user.update({
+      where: { id },
+      data: {
+        ...(dto.firstName !== undefined ? { firstName: dto.firstName } : {}),
+        ...(dto.lastName !== undefined ? { lastName: dto.lastName } : {}),
+      },
+    });
+
+    await this.audit.record({
+      actorUserId: id,
+      action: 'user.profile_updated',
+      resourceType: 'User',
+      resourceId: id,
+      details: { changes: dto },
+    });
+
+    return toView(user);
+  }
+
+  /** Self-service password change — requires the current password, same as any other credential rotation. */
+  async changeOwnPassword(id: string, dto: ChangePasswordDto): Promise<void> {
+    const user = await this.getUserOrThrow(id);
+    const matches = await bcrypt.compare(
+      dto.currentPassword,
+      user.passwordHash,
+    );
+    if (!matches) {
+      throw new UnauthorizedException('Current password is incorrect.');
+    }
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, SALT_ROUNDS);
+    await this.prisma.user.update({ where: { id }, data: { passwordHash } });
+
+    await this.audit.record({
+      actorUserId: id,
+      action: 'user.password_changed',
+      resourceType: 'User',
+      resourceId: id,
+    });
   }
 
   private async getUserOrThrow(id: string) {

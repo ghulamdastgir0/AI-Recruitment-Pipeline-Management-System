@@ -31,6 +31,8 @@ interface AuthContextValue {
   ready: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  /** Merges a patch (e.g. an edited name) into the cached session user — keeps the nav's avatar/email in sync after a profile edit without a full re-login. */
+  updateUser: (patch: Partial<AuthUser>) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -72,8 +74,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }
 
+  function updateUser(patch: Partial<AuthUser>) {
+    setUser((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, ...patch };
+      window.localStorage.setItem("user", JSON.stringify(next));
+      return next;
+    });
+  }
+
   return (
-    <AuthContext.Provider value={{ token, user, ready, login, logout }}>
+    <AuthContext.Provider value={{ token, user, ready, login, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

@@ -275,18 +275,16 @@ function UsersAdmin() {
   }
 
   return (
-    <>
-      <StaffNav />
-      <main className="mx-auto w-full max-w-4xl px-6 py-8">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="font-heading text-2xl font-semibold text-text-primary">
-            Users
-          </h1>
-          <Button onClick={() => setShowCreate((v) => !v)}>
-            {showCreate ? "Cancel" : "New User"}
-          </Button>
-        </div>
-        <p className="mt-1 text-sm text-text-muted">
+    <StaffNav
+      title="Users"
+      actions={
+        <Button onClick={() => setShowCreate((v) => !v)}>
+          {showCreate ? "Cancel" : "New User"}
+        </Button>
+      }
+    >
+      <div className="mx-auto w-full max-w-4xl">
+        <p className="text-sm text-text-muted">
           Add, edit, deactivate, or remove HR Admin and Hiring Manager
           accounts.
         </p>
@@ -330,14 +328,14 @@ function UsersAdmin() {
                     <p className="text-sm text-text-muted">{u.email}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="rounded-full bg-black/5 px-3 py-1 text-xs font-medium text-text-secondary">
+                    <span className="rounded-full bg-surface-muted px-3 py-1 text-xs font-medium text-text-secondary">
                       {u.role.replaceAll("_", " ")}
                     </span>
                     <span
                       className={`rounded-full px-3 py-1 text-xs font-medium ${
                         u.isActive
                           ? "bg-success-soft text-success-text"
-                          : "bg-black/5 text-text-muted"
+                          : "bg-surface-muted text-text-muted"
                       }`}
                     >
                       {u.isActive ? "Active" : "Inactive"}
@@ -400,8 +398,8 @@ function UsersAdmin() {
             );
           })}
         </div>
-      </main>
-    </>
+      </div>
+    </StaffNav>
   );
 }
 

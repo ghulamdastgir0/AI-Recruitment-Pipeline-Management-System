@@ -9,7 +9,20 @@ import { StaffNav } from "@/components/StaffNav";
 import { InternalStatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import {
+  BriefcaseIcon,
+  ClockIcon,
+  GlobeIcon,
+  LayersIcon,
+  LevelIcon,
+  MapPinIcon,
+  PauseIcon,
+  PlusIcon,
+  SearchIcon,
+  TrashIcon,
+} from "@/components/ui/icons";
 import { Input, Label, Textarea } from "@/components/ui/Input";
+import { StatTile } from "@/components/ui/StatTile";
 import { apiFetch, ApiError, deleteRequest, postJson } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
@@ -86,8 +99,11 @@ function CreateJobForm({ onCreated }: { onCreated: (jobId: string) => void }) {
   }
 
   return (
-    <Card className="mt-4">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+    <Card className="mt-6">
+      <h2 className="font-heading text-base font-semibold text-text-primary">
+        New job posting
+      </h2>
+      <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-3">
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="job-title">Title</Label>
           <Input
@@ -263,137 +279,177 @@ function StaffDashboard() {
     }
   }
 
+  const openCount = jobs?.filter((j) => j.status === "PUBLISHED").length ?? 0;
+  const pausedCount = jobs?.filter((j) => j.status === "PAUSED").length ?? 0;
+
   return (
-    <>
-      <StaffNav />
-      <main className="mx-auto w-full max-w-5xl px-6 py-8">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="font-heading text-2xl font-semibold text-text-primary">
-            {canManage ? "Job Postings" : "My Assigned Job Postings"}
-          </h1>
-          {canManage && (
-            <Button onClick={() => setShowCreate((v) => !v)}>
-              {showCreate ? "Cancel" : "New Job Posting"}
-            </Button>
-          )}
+    <StaffNav
+      title={canManage ? "Job Postings" : "My Assigned Job Postings"}
+      actions={
+        canManage && (
+          <Button onClick={() => setShowCreate((v) => !v)}>
+            <PlusIcon className="h-4 w-4" />
+            {showCreate ? "Cancel" : "New Job Posting"}
+          </Button>
+        )
+      }
+    >
+      {error && (
+        <div className="mb-4">
+          <ErrorState message={error} />
         </div>
+      )}
 
-        {error && (
-          <div className="mt-4">
-            <ErrorState message={error} />
+      {canManage && showCreate && (
+        <CreateJobForm
+          onCreated={(jobId) => {
+            setShowCreate(false);
+            router.push(`/staff/jobs/${jobId}`);
+          }}
+        />
+      )}
+
+      {jobs !== null && (
+        <>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <StatTile
+              label="Open postings"
+              value={openCount}
+              hint="Currently published"
+              icon={<BriefcaseIcon className="h-full w-full" />}
+              accent="success"
+            />
+            <StatTile
+              label="Paused"
+              value={pausedCount}
+              hint="Not accepting applicants"
+              icon={<PauseIcon className="h-full w-full" />}
+              accent="warning"
+            />
+            <StatTile
+              label="Total postings"
+              value={jobs.length}
+              hint={canManage ? "All postings" : "Assigned to you"}
+              icon={<LayersIcon className="h-full w-full" />}
+              accent="brand"
+            />
           </div>
-        )}
 
-        {canManage && showCreate && (
-          <CreateJobForm
-            onCreated={(jobId) => {
-              setShowCreate(false);
-              router.push(`/staff/jobs/${jobId}`);
-            }}
-          />
-        )}
-
-        {jobs !== null && (
-          <div className="mt-6">
+          <div className="relative mt-6 max-w-sm">
+            <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
             <Input
               placeholder="Search by title…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="max-w-sm"
+              className="pl-9"
             />
           </div>
-        )}
+        </>
+      )}
 
-        {jobs === null && !error && (
-          <div className="mt-6">
-            <LoadingState />
-          </div>
-        )}
-        {jobs?.length === 0 && (
-          <div className="mt-6">
-            <EmptyState
-              label={
-                search.trim()
-                  ? "No job postings match your search."
-                  : "No job postings to show yet."
-              }
-            />
-          </div>
-        )}
+      {jobs === null && !error && (
+        <div className="mt-6">
+          <LoadingState />
+        </div>
+      )}
+      {jobs?.length === 0 && (
+        <div className="mt-6">
+          <EmptyState
+            label={
+              search.trim()
+                ? "No job postings match your search."
+                : "No job postings to show yet."
+            }
+          />
+        </div>
+      )}
 
-        <div className="mt-6 flex flex-col gap-3">
-          {jobs?.map((job) => (
-            <Card key={job.id} className="p-4">
-              <div className="flex items-center justify-between gap-3">
-                <Link
-                  href={`/staff/jobs/${job.id}`}
-                  className="font-heading text-base font-semibold text-text-primary hover:text-brand-700"
-                >
-                  {job.title}
-                </Link>
-                <InternalStatusBadge status={job.status} />
-              </div>
-              <p className="mt-1 text-sm text-text-muted">
-                {[job.location, job.seniority, job.workModel]
-                  .filter(Boolean)
-                  .join(" · ") || "No location specified"}
-              </p>
-              <p className="mt-1 text-sm text-text-muted">
-                Deadline:{" "}
-                <span
-                  className={
-                    (job.status === "PUBLISHED" || job.status === "PAUSED") &&
-                    new Date(job.deadline).getTime() < new Date().getTime()
-                      ? "font-medium text-warning-text"
-                      : "font-medium text-text-secondary"
-                  }
-                >
-                  {formatDeadline(job.deadline)}
+      <div className="mt-6 flex flex-col gap-3">
+        {jobs?.map((job) => (
+          <Card key={job.id} className="p-4">
+            <div className="flex items-center justify-between gap-3">
+              <Link
+                href={`/staff/jobs/${job.id}`}
+                className="font-heading text-base font-semibold text-text-primary hover:text-brand-700"
+              >
+                {job.title}
+              </Link>
+              <InternalStatusBadge status={job.status} />
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-text-muted">
+              {job.location && (
+                <span className="inline-flex items-center gap-1.5">
+                  <MapPinIcon className="h-3.5 w-3.5" />
+                  {job.location}
                 </span>
-              </p>
-              {canManage && (
-                <div className="mt-3 flex items-center gap-2">
-                  {job.status === "PUBLISHED" && (
-                    <Button
-                      variant="secondary"
-                      onClick={() => void pauseOrResume(job.id, "pause")}
-                      disabled={busyJobId === job.id}
-                      className="px-2.5 py-1 text-xs"
-                    >
-                      {busyJobId === job.id && busyAction === "pause"
-                        ? "Pausing…"
-                        : "Pause"}
-                    </Button>
-                  )}
-                  {job.status === "PAUSED" && (
-                    <Button
-                      variant="secondary"
-                      onClick={() => void pauseOrResume(job.id, "resume")}
-                      disabled={busyJobId === job.id}
-                      className="px-2.5 py-1 text-xs"
-                    >
-                      {busyJobId === job.id && busyAction === "resume"
-                        ? "Resuming…"
-                        : "Resume"}
-                    </Button>
-                  )}
+              )}
+              {job.seniority && (
+                <span className="inline-flex items-center gap-1.5">
+                  <LevelIcon className="h-3.5 w-3.5" />
+                  {job.seniority}
+                </span>
+              )}
+              {job.workModel && (
+                <span className="inline-flex items-center gap-1.5">
+                  <GlobeIcon className="h-3.5 w-3.5" />
+                  {job.workModel}
+                </span>
+              )}
+              <span
+                className={`inline-flex items-center gap-1.5 ${
+                  (job.status === "PUBLISHED" || job.status === "PAUSED") &&
+                  new Date(job.deadline).getTime() < new Date().getTime()
+                    ? "font-medium text-warning-text"
+                    : ""
+                }`}
+              >
+                <ClockIcon className="h-3.5 w-3.5" />
+                Deadline: {formatDeadline(job.deadline)}
+              </span>
+            </div>
+            {canManage && (
+              <div className="mt-3 flex items-center gap-2">
+                {job.status === "PUBLISHED" && (
                   <Button
-                    variant="destructive"
-                    onClick={() => void removeJob(job.id, job.title)}
+                    variant="secondary"
+                    onClick={() => void pauseOrResume(job.id, "pause")}
                     disabled={busyJobId === job.id}
                     className="px-2.5 py-1 text-xs"
                   >
-                    {busyJobId === job.id && busyAction === "delete"
-                      ? "Deleting…"
-                      : "Delete"}
+                    {busyJobId === job.id && busyAction === "pause"
+                      ? "Pausing…"
+                      : "Pause"}
                   </Button>
-                </div>
-              )}
-            </Card>
-          ))}
-        </div>
-      </main>
-    </>
+                )}
+                {job.status === "PAUSED" && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => void pauseOrResume(job.id, "resume")}
+                    disabled={busyJobId === job.id}
+                    className="px-2.5 py-1 text-xs"
+                  >
+                    {busyJobId === job.id && busyAction === "resume"
+                      ? "Resuming…"
+                      : "Resume"}
+                  </Button>
+                )}
+                <Button
+                  variant="destructive"
+                  onClick={() => void removeJob(job.id, job.title)}
+                  disabled={busyJobId === job.id}
+                  className="px-2.5 py-1 text-xs"
+                >
+                  <TrashIcon className="h-3.5 w-3.5" />
+                  {busyJobId === job.id && busyAction === "delete"
+                    ? "Deleting…"
+                    : "Delete"}
+                </Button>
+              </div>
+            )}
+          </Card>
+        ))}
+      </div>
+    </StaffNav>
   );
 }
 

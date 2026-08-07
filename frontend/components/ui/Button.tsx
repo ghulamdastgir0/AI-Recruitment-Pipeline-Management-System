@@ -6,11 +6,11 @@ const VARIANT_CLASSES: Record<Variant, string> = {
   primary:
     "bg-brand-600 text-white hover:bg-brand-700 disabled:bg-brand-600/50",
   secondary:
-    "bg-white text-brand-700 border border-brand-200 hover:bg-brand-50 disabled:opacity-50",
+    "bg-surface-card text-brand-700 border border-brand-200 hover:bg-brand-50 disabled:opacity-50",
   destructive:
-    "bg-white text-danger border border-danger/30 hover:bg-danger-soft disabled:opacity-50",
+    "bg-surface-card text-danger border border-danger/30 hover:bg-danger-soft disabled:opacity-50",
   ghost:
-    "bg-transparent text-text-secondary hover:bg-black/5 disabled:opacity-50",
+    "bg-transparent text-text-secondary hover:bg-surface-muted disabled:opacity-50",
 };
 
 export const Button = forwardRef<

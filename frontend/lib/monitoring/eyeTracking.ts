@@ -34,9 +34,13 @@ const RIGHT_IRIS_CENTER = 473;
 // showed a deliberate side glance rarely pushes the iris-in-socket ratio
 // that far, so it never left CENTER. Lowered after that feedback; still a
 // heuristic, so keep tuning if it over/under-fires in practice.
-export const GAZE_HORIZONTAL_THRESHOLD = 0.1;
-export const GAZE_VERTICAL_THRESHOLD = 0.1;
-export const EYE_ASPECT_RATIO_CLOSED_THRESHOLD = 0.15;
+// Slightly loosened from 0.1/0.1/0.15 — gave a bit more tolerance for
+// ordinary head/eye micro-movement before counting as a deliberate
+// look-away, and for a normal squint/slow blink before counting as
+// "eyes closed" (a lower EAR cutoff requires eyes to be more fully shut).
+export const GAZE_HORIZONTAL_THRESHOLD = 0.12;
+export const GAZE_VERTICAL_THRESHOLD = 0.12;
+export const EYE_ASPECT_RATIO_CLOSED_THRESHOLD = 0.13;
 
 function horizontalRatio(
   iris: NormalizedLandmark,

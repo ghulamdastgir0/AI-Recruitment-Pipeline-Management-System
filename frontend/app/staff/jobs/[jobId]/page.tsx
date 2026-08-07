@@ -16,6 +16,7 @@ import { StaffNav } from "@/components/StaffNav";
 import { InternalStatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { ArrowLeftIcon } from "@/components/ui/icons";
 import { Input, Label, Textarea } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import {
@@ -478,49 +479,41 @@ function JobDetail() {
 
   if (forbidden) {
     return (
-      <>
-        <StaffNav />
-        <main className="mx-auto w-full max-w-3xl p-6">
-          <PermissionDeniedState />
-        </main>
-      </>
+      <StaffNav title="Job Posting">
+        <PermissionDeniedState />
+      </StaffNav>
     );
   }
   if (error) {
     return (
-      <>
-        <StaffNav />
-        <main className="mx-auto w-full max-w-3xl p-6">
-          <ErrorState message={error} />
-        </main>
-      </>
+      <StaffNav title="Job Posting">
+        <ErrorState message={error} />
+      </StaffNav>
     );
   }
   if (!job) {
     return (
-      <>
-        <StaffNav />
-        <main className="mx-auto w-full max-w-3xl p-6">
-          <LoadingState />
-        </main>
-      </>
+      <StaffNav title="Job Posting">
+        <LoadingState />
+      </StaffNav>
     );
   }
 
   return (
-    <>
-      <StaffNav />
-      <main className="mx-auto w-full max-w-3xl px-6 py-8">
-        <Link href="/staff" className="text-sm font-medium text-brand-700 hover:underline">
-          ← All jobs
-        </Link>
-        <div className="mt-2 flex items-center gap-3">
-          <h1 className="font-heading text-2xl font-semibold text-text-primary">
-            {job.title}
-          </h1>
+    <StaffNav
+      title={
+        <span className="flex flex-wrap items-center gap-3">
+          {job.title}
           <InternalStatusBadge status={job.status} />
-        </div>
-        <p className="mt-1 text-sm text-text-muted">
+        </span>
+      }
+    >
+      <div className="mx-auto w-full max-w-3xl">
+        <Link href="/staff" className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:underline">
+          <ArrowLeftIcon className="h-3.5 w-3.5" />
+          All jobs
+        </Link>
+        <p className="mt-3 text-sm text-text-muted">
           Application deadline:{" "}
           <span
             className={
@@ -730,8 +723,8 @@ function JobDetail() {
             </Card>
           ))}
         </div>
-      </main>
-    </>
+      </div>
+    </StaffNav>
   );
 }
 

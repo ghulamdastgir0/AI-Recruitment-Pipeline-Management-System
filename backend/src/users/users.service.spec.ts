@@ -1,4 +1,9 @@
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import * as bcrypt from 'bcryptjs';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { AuditLogService } from '../audit/audit-log.service';
@@ -182,6 +187,86 @@ describe('UsersService', () => {
       );
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'user.removed' }),
+      );
+    });
+  });
+
+  describe('getOwnProfile / updateOwnProfile / changeOwnPassword', () => {
+    it('getOwnProfile returns even a SUPER_ADMIN row (unlike update())', async () => {
+      const { service, prisma } = buildService();
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue(SUPER_ADMIN_ROW);
+
+      const result = await service.getOwnProfile('super-1');
+
+      expect(result.id).toBe('super-1');
+    });
+
+    it("updateOwnProfile edits a SUPER_ADMIN's own name without the update() role block", async () => {
+      const { service, prisma, audit } = buildService();
+      (prisma.user.update as jest.Mock).mockResolvedValue({
+        ...SUPER_ADMIN_ROW,
+        firstName: 'New',
+      });
+
+      const result = await service.updateOwnProfile('super-1', {
+        firstName: 'New',
+      });
+
+      expect(result.firstName).toBe('New');
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorUserId: 'super-1',
+          action: 'user.profile_updated',
+        }),
+      );
+    });
+
+    it('changeOwnPassword rejects an incorrect current password', async () => {
+      const { service, prisma } = buildService();
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue({
+        ...HR_ADMIN_ROW,
+        passwordHash: bcrypt.hashSync('correct-password', 4),
+      });
+
+      await expect(
+        service.changeOwnPassword('user-1', {
+          currentPassword: 'wrong-password',
+          newPassword: 'a-new-strong-password',
+        }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('changeOwnPassword hashes and stores the new password, then audit-logs user.password_changed', async () => {
+      const { service, prisma, audit } = buildService();
+      (prisma.user.findUnique as jest.Mock).mockResolvedValue({
+        ...HR_ADMIN_ROW,
+        passwordHash: bcrypt.hashSync('correct-password', 4),
+      });
+      (prisma.user.update as jest.Mock).mockResolvedValue(HR_ADMIN_ROW);
+
+      await service.changeOwnPassword('user-1', {
+        currentPassword: 'correct-password',
+        newPassword: 'a-new-strong-password',
+      });
+
+      expect(prisma.user.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'user-1' },
+          data: { passwordHash: expect.any(String) },
+        }),
+      );
+      const [updateCall] = (prisma.user.update as jest.Mock).mock.calls[0] as [
+        { data: { passwordHash: string } },
+      ];
+      const newHash = updateCall.data.passwordHash;
+      expect(bcrypt.compareSync('a-new-strong-password', newHash)).toBe(true);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorUserId: 'user-1',
+          action: 'user.password_changed',
+        }),
       );
     });
   });

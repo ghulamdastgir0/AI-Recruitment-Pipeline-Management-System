@@ -2,18 +2,16 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { AuditLogService } from '../audit/audit-log.service';
 import { JobPostingsService } from '../job-postings/job-postings.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { LlmClientService } from '../shared/llm/llm-client.service';
+import { AssistantAgentGraph } from './assistant-agent.graph';
 import { AssistantOrchestratorService } from './assistant-orchestrator.service';
 import { ToolRegistryService } from './tool-registry.service';
 
 function buildOrchestrator() {
-  const llm = { chat: jest.fn() } as unknown as jest.Mocked<LlmClientService>;
+  const agentGraph = {
+    run: jest.fn(),
+  } as unknown as jest.Mocked<AssistantAgentGraph>;
   const toolRegistry = {
-    isGated: jest.fn().mockReturnValue(false),
     execute: jest.fn(),
-    parseArgs: jest.fn(
-      (raw: string) => JSON.parse(raw) as Record<string, unknown>,
-    ),
   } as unknown as jest.Mocked<ToolRegistryService>;
   const prisma = {
     pendingAssistantAction: {
@@ -34,194 +32,73 @@ function buildOrchestrator() {
   } as unknown as jest.Mocked<JobPostingsService>;
 
   const orchestrator = new AssistantOrchestratorService(
-    llm,
+    agentGraph,
     toolRegistry,
     prisma,
     audit,
     jobPostings,
   );
-  return { orchestrator, llm, toolRegistry, prisma, audit, jobPostings };
+  return { orchestrator, agentGraph, toolRegistry, prisma, audit, jobPostings };
 }
 
 describe('AssistantOrchestratorService', () => {
   describe('handleMessage', () => {
-    it('returns the plain reply when the model makes no tool calls', async () => {
-      const { orchestrator, llm } = buildOrchestrator();
-      llm.chat.mockResolvedValue({
-        message: {
-          role: 'assistant',
-          content:
-            'I can only help with job postings, CV matching, candidate ranking, and company policies.',
-        },
-        finishReason: 'stop',
+    it('returns the graph result reply as-is when there is no gated action', async () => {
+      const { orchestrator, agentGraph } = buildOrchestrator();
+      agentGraph.run.mockResolvedValue({
+        finalReply:
+          'I can only help with job postings, CV matching, candidate ranking, and company policies.',
       });
 
       const result = await orchestrator.handleMessage(
         [],
         'what is the capital of France?',
         'user-1',
+        'HR_ADMIN',
       );
 
       expect(result.reply).toContain('I can only help with job postings');
       expect(result.pendingAction).toBeUndefined();
     });
 
-    it('returns a friendly reply instead of throwing when the LLM call fails', async () => {
-      const { orchestrator, llm } = buildOrchestrator();
-      llm.chat.mockRejectedValue(
-        new Error(
-          'Groq API error (429): {"error":{"type":"rate_limit_exceeded"}}',
-        ),
-      );
+    it('passes the actor role through to tool selection and the graph', async () => {
+      const { orchestrator, agentGraph } = buildOrchestrator();
+      agentGraph.run.mockResolvedValue({ finalReply: 'ok' });
 
-      const result = await orchestrator.handleMessage(
-        [],
-        'create a job posting for a QA engineer',
-        'user-1',
-      );
+      await orchestrator.handleMessage([], 'list my jobs', 'user-1', 'HIRING_MANAGER');
 
-      expect(result.reply).toMatch(/rate-limited/i);
-      expect(result.pendingAction).toBeUndefined();
-      // Rate limits don't get the quiet retry — Groq's own backoff hint is
-      // several seconds, so retrying immediately would just fail again.
-      expect(llm.chat).toHaveBeenCalledTimes(1);
+      expect(agentGraph.run).toHaveBeenCalledWith(
+        expect.objectContaining({ actorUserId: 'user-1', actorRole: 'HIRING_MANAGER' }),
+      );
     });
 
-    it('quietly retries once and succeeds after a transient (non-rate-limit) failure', async () => {
-      const { orchestrator, llm } = buildOrchestrator();
-      llm.chat
-        .mockRejectedValueOnce(new Error('fetch failed: network down'))
-        .mockResolvedValueOnce({
-          message: { role: 'assistant', content: 'All set.' },
-          finishReason: 'stop',
-        });
-
-      const result = await orchestrator.handleMessage([], 'hello', 'user-1');
-
-      expect(result.reply).toBe('All set.');
-      expect(llm.chat).toHaveBeenCalledTimes(2);
-    });
-
-    it('returns a generic unavailable reply for non-rate-limit LLM failures', async () => {
-      const { orchestrator, llm } = buildOrchestrator();
-      llm.chat.mockRejectedValue(new Error('fetch failed: network down'));
-
-      const result = await orchestrator.handleMessage([], 'hello', 'user-1');
-
-      expect(result.reply).toMatch(/temporarily unavailable/i);
-      expect(llm.chat).toHaveBeenCalledTimes(2);
-    });
-
-    it('executes an ungated tool call and feeds the result back for a final answer', async () => {
-      const { orchestrator, llm, toolRegistry } = buildOrchestrator();
-      llm.chat
-        .mockResolvedValueOnce({
-          message: {
-            role: 'assistant',
-            content: null,
-            tool_calls: [
-              {
-                id: 'call-1',
-                type: 'function',
-                function: {
-                  name: 'searchCompanyPolicies',
-                  arguments: '{"query":"parental leave"}',
-                },
-              },
-            ],
-          },
-          finishReason: 'tool_calls',
-        })
-        .mockResolvedValueOnce({
-          message: {
-            role: 'assistant',
-            content: 'Parental leave is 16 weeks.',
-          },
-          finishReason: 'stop',
-        });
-      toolRegistry.execute.mockResolvedValue({
-        ok: true,
-        result: { results: [] },
-      });
-
-      const result = await orchestrator.handleMessage(
-        [],
-        'what is parental leave?',
-        'user-1',
-      );
-
-      expect(toolRegistry.execute).toHaveBeenCalledWith(
-        'searchCompanyPolicies',
-        { query: 'parental leave' },
-        { actorUserId: 'user-1', attachedFile: undefined },
-      );
-      expect(result.reply).toBe('Parental leave is 16 weeks.');
-      expect(llm.chat).toHaveBeenCalledTimes(2);
-    });
-
-    it('surfaces the created job posting as structured data alongside the reply', async () => {
-      const { orchestrator, llm, toolRegistry } = buildOrchestrator();
+    it('surfaces the created job posting the graph tracked, alongside the reply', async () => {
+      const { orchestrator, agentGraph } = buildOrchestrator();
       const createdJob = {
         id: 'job-1',
         title: 'Frontend Web Developer',
         status: 'DRAFT',
         location: 'Lahore, Pakistan',
       };
-      llm.chat
-        .mockResolvedValueOnce({
-          message: {
-            role: 'assistant',
-            content: null,
-            tool_calls: [
-              {
-                id: 'call-1',
-                type: 'function',
-                function: {
-                  name: 'createJobPosting',
-                  arguments: '{"title":"Frontend Web Developer"}',
-                },
-              },
-            ],
-          },
-          finishReason: 'tool_calls',
-        })
-        .mockResolvedValueOnce({
-          message: {
-            role: 'assistant',
-            content: "I've created a draft for Frontend Web Developer.",
-          },
-          finishReason: 'stop',
-        });
-      toolRegistry.execute.mockResolvedValue({ ok: true, result: createdJob });
+      agentGraph.run.mockResolvedValue({
+        finalReply: "I've created a draft for Frontend Web Developer.",
+        lastJobPosting: createdJob as never,
+      });
 
       const result = await orchestrator.handleMessage(
         [],
         'create a frontend web dev job',
         'user-1',
+        'HR_ADMIN',
       );
 
       expect(result.jobPosting).toEqual(createdJob);
     });
 
-    it('short-circuits a gated tool call into a pendingAction instead of executing it', async () => {
-      const { orchestrator, llm, toolRegistry, prisma } = buildOrchestrator();
-      toolRegistry.isGated.mockReturnValue(true);
-      llm.chat.mockResolvedValue({
-        message: {
-          role: 'assistant',
-          content: null,
-          tool_calls: [
-            {
-              id: 'call-1',
-              type: 'function',
-              function: {
-                name: 'publishJobPosting',
-                arguments: '{"jobPostingId":"job-1"}',
-              },
-            },
-          ],
-        },
-        finishReason: 'tool_calls',
+    it('turns a gatedAction from the graph into a pendingAction instead of executing it', async () => {
+      const { orchestrator, agentGraph, toolRegistry, prisma } = buildOrchestrator();
+      agentGraph.run.mockResolvedValue({
+        gatedAction: { tool: 'publishJobPosting', args: { jobPostingId: 'job-1' } },
       });
       (prisma.pendingAssistantAction.create as jest.Mock).mockResolvedValue({
         id: 'action-1',
@@ -234,6 +111,7 @@ describe('AssistantOrchestratorService', () => {
         [],
         'publish the backend engineer posting',
         'user-1',
+        'HR_ADMIN',
       );
 
       expect(toolRegistry.execute).not.toHaveBeenCalled();
@@ -244,57 +122,31 @@ describe('AssistantOrchestratorService', () => {
       expect(result.reply).toContain('confirmation');
     });
 
-    it('binds an attached CV file only to the uploadCandidateCv tool call', async () => {
-      const { orchestrator, llm, toolRegistry } = buildOrchestrator();
-      const attachedFile = {
-        buffer: Buffer.from('%PDF-1.4'),
-        originalname: 'resume.pdf',
-      };
-      llm.chat
-        .mockResolvedValueOnce({
-          message: {
-            role: 'assistant',
-            content: null,
-            tool_calls: [
-              {
-                id: 'call-1',
-                type: 'function',
-                function: {
-                  name: 'uploadCandidateCv',
-                  arguments: '{"jobPostingId":"job-1"}',
-                },
-              },
-            ],
-          },
-          finishReason: 'tool_calls',
-        })
-        .mockResolvedValueOnce({
-          message: { role: 'assistant', content: 'Uploaded.' },
-          finishReason: 'stop',
-        });
-      toolRegistry.execute.mockResolvedValue({
-        ok: true,
-        result: { candidateProfileId: 'cand-1' },
+    it('resolves the job posting title into the pendingAction preview before confirmation', async () => {
+      const { orchestrator, agentGraph, prisma, jobPostings } = buildOrchestrator();
+      agentGraph.run.mockResolvedValue({
+        gatedAction: { tool: 'publishJobPosting', args: { jobPostingId: 'job-1' } },
+      });
+      (prisma.pendingAssistantAction.create as jest.Mock).mockResolvedValue({
+        id: 'action-1',
+        expiresAt: new Date(Date.now() + 1_800_000),
       });
 
-      await orchestrator.handleMessage(
+      const result = await orchestrator.handleMessage(
         [],
-        'upload this CV for the job',
+        'publish the backend engineer posting',
         'user-1',
-        attachedFile,
+        'HR_ADMIN',
       );
 
-      expect(toolRegistry.execute).toHaveBeenCalledWith(
-        'uploadCandidateCv',
-        { jobPostingId: 'job-1' },
-        { actorUserId: 'user-1', attachedFile },
-      );
+      expect(jobPostings.getById).toHaveBeenCalledWith('job-1');
+      expect(result.reply).toContain('Backend Engineer');
     });
   });
 
   describe('confirmAction', () => {
-    it('executes the tool directly (no LLM call) and marks the action CONFIRMED', async () => {
-      const { orchestrator, llm, toolRegistry, prisma, audit } =
+    it('executes the tool directly (no graph run) and marks the action CONFIRMED', async () => {
+      const { orchestrator, agentGraph, toolRegistry, prisma, audit } =
         buildOrchestrator();
       (prisma.pendingAssistantAction.findUnique as jest.Mock).mockResolvedValue(
         {
@@ -310,13 +162,13 @@ describe('AssistantOrchestratorService', () => {
         result: { id: 'job-1', status: 'PUBLISHED' },
       });
 
-      const result = await orchestrator.confirmAction('action-1', 'user-2');
+      const result = await orchestrator.confirmAction('action-1', 'user-2', 'HR_ADMIN');
 
-      expect(llm.chat).not.toHaveBeenCalled();
+      expect(agentGraph.run).not.toHaveBeenCalled();
       expect(toolRegistry.execute).toHaveBeenCalledWith(
         'publishJobPosting',
         { jobPostingId: 'job-1' },
-        { actorUserId: 'user-2' },
+        { actorUserId: 'user-2', actorRole: 'HR_ADMIN' },
       );
       expect(prisma.pendingAssistantAction.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -345,43 +197,7 @@ describe('AssistantOrchestratorService', () => {
         result: { id: 'job-1', status: 'PUBLISHED' },
       });
 
-      const result = await orchestrator.confirmAction('action-1', 'user-2');
-
-      expect(jobPostings.getById).toHaveBeenCalledWith('job-1');
-      expect(result.reply).toContain('Backend Engineer');
-    });
-
-    it('resolves the job posting title into the pendingAction preview shown before HR confirms', async () => {
-      const { orchestrator, llm, toolRegistry, prisma, jobPostings } =
-        buildOrchestrator();
-      toolRegistry.isGated.mockReturnValue(true);
-      llm.chat.mockResolvedValue({
-        message: {
-          role: 'assistant',
-          content: null,
-          tool_calls: [
-            {
-              id: 'call-1',
-              type: 'function',
-              function: {
-                name: 'publishJobPosting',
-                arguments: '{"jobPostingId":"job-1"}',
-              },
-            },
-          ],
-        },
-        finishReason: 'tool_calls',
-      });
-      (prisma.pendingAssistantAction.create as jest.Mock).mockResolvedValue({
-        id: 'action-1',
-        expiresAt: new Date(Date.now() + 1_800_000),
-      });
-
-      const result = await orchestrator.handleMessage(
-        [],
-        'publish the backend engineer posting',
-        'user-1',
-      );
+      const result = await orchestrator.confirmAction('action-1', 'user-2', 'HR_ADMIN');
 
       expect(jobPostings.getById).toHaveBeenCalledWith('job-1');
       expect(result.reply).toContain('Backend Engineer');
@@ -403,7 +219,7 @@ describe('AssistantOrchestratorService', () => {
         result: { error: 'Assign at least one Hiring Manager before publishing this job posting.' },
       });
 
-      const result = await orchestrator.confirmAction('action-1', 'user-2');
+      const result = await orchestrator.confirmAction('action-1', 'user-2', 'HR_ADMIN');
 
       expect(prisma.pendingAssistantAction.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -424,7 +240,7 @@ describe('AssistantOrchestratorService', () => {
       );
 
       await expect(
-        orchestrator.confirmAction('missing', 'user-1'),
+        orchestrator.confirmAction('missing', 'user-1', 'HR_ADMIN'),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
@@ -435,7 +251,7 @@ describe('AssistantOrchestratorService', () => {
       );
 
       await expect(
-        orchestrator.confirmAction('action-1', 'user-1'),
+        orchestrator.confirmAction('action-1', 'user-1', 'HR_ADMIN'),
       ).rejects.toBeInstanceOf(ConflictException);
     });
 
@@ -450,7 +266,7 @@ describe('AssistantOrchestratorService', () => {
       );
 
       await expect(
-        orchestrator.confirmAction('action-1', 'user-1'),
+        orchestrator.confirmAction('action-1', 'user-1', 'HR_ADMIN'),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(prisma.pendingAssistantAction.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: { status: 'EXPIRED' } }),

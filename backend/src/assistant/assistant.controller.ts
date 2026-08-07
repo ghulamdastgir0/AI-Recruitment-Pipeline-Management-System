@@ -45,7 +45,7 @@ const optionalPdfValidationPipe = new ParseFilePipeBuilder()
 @ApiTags('assistant')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('SUPER_ADMIN', 'HR_ADMIN')
+@Roles('SUPER_ADMIN', 'HR_ADMIN', 'HIRING_MANAGER')
 @Controller('assistant')
 export class AssistantController {
   constructor(private readonly orchestrator: AssistantOrchestratorService) {}
@@ -103,6 +103,7 @@ export class AssistantController {
       history,
       body.message,
       user.id,
+      user.role,
       file,
     );
   }
@@ -117,7 +118,7 @@ export class AssistantController {
     @Param('id') id: string,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<AssistantReply> {
-    return this.orchestrator.confirmAction(id, user.id);
+    return this.orchestrator.confirmAction(id, user.id, user.role);
   }
 
   @Post('actions/:id/cancel')

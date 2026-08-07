@@ -5,23 +5,26 @@ import { useCallback, useRef, useState } from "react";
 import { estimateGaze, GazeDirection, GazeEstimate } from "@/lib/monitoring/eyeTracking";
 import { ViolationType } from "@/lib/monitoring/violationTypes";
 
-const DIRECTION_HOLD_MS = 5_000;
+// Slightly loosened from 5s — same rationale as the other proctoring
+// thresholds (see useInterviewMonitoring.ts): more tolerance for a brief
+// glance away before it counts as a sustained look-away.
+const DIRECTION_HOLD_MS = 6_000;
 
 // "Shifty eyes" detector: repeatedly flicking gaze away and back (e.g.
 // reading notes off-screen in quick glances) never holds long enough to
 // trip DIRECTION_HOLD_MS on its own, so it needs its own signal based on
 // how often/how long the direction keeps changing within a rolling window.
-const RAPID_SWITCH_WINDOW_MS = 10_000;
-// "More than 8 direction changes within 10 seconds."
-const RAPID_SWITCH_COUNT_THRESHOLD = 8;
+const RAPID_SWITCH_WINDOW_MS = 12_000;
+// "More than 10 direction changes within 12 seconds."
+const RAPID_SWITCH_COUNT_THRESHOLD = 10;
 // "Repeatedly alternates between CENTER and the same direction for several
 // seconds" — a sustained back-and-forth pattern, even if too slow to trip
 // the count threshold above.
-const ALTERNATION_MIN_COUNT = 4;
-const ALTERNATION_MIN_DURATION_MS = 6_000;
+const ALTERNATION_MIN_COUNT = 5;
+const ALTERNATION_MIN_DURATION_MS = 7_000;
 // Once fired, require a fresh count/pattern (not just one more flicker)
 // before firing again.
-const RAPID_SWITCH_COOLDOWN_MS = 10_000;
+const RAPID_SWITCH_COOLDOWN_MS = 12_000;
 
 export interface EyeTrackingState {
   direction: GazeDirection;

@@ -1,20 +1,20 @@
 import {
   ConflictException,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { AuditLogService } from '../audit/audit-log.service';
 import { UploadedCv } from '../candidates/services/cv-upload.service';
+import type { Role } from '../generated/prisma/enums';
 import {
   JobPostingsService,
   JobPostingWithSkills,
 } from '../job-postings/job-postings.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { LlmClientService } from '../shared/llm/llm-client.service';
 import { ChatMessage } from '../shared/llm/llm-client.types';
-import { ASSISTANT_SYSTEM_PROMPT } from './system-prompt';
-import { AssistantToolDefinition, selectAssistantTools } from './tool-definitions';
+import { AssistantAgentGraph } from './assistant-agent.graph';
+import { buildAssistantSystemPrompt } from './system-prompt';
+import { selectAssistantTools } from './tool-definitions';
 import { ToolRegistryService } from './tool-registry.service';
 
 export interface AssistantMessageInput {
@@ -37,30 +37,22 @@ export interface AssistantReply {
 }
 
 const JOB_POSTING_RESULT_TOOLS = new Set(['createJobPosting', 'updateJobPosting']);
-
-const MAX_TOOL_ITERATIONS = 5;
 const PENDING_ACTION_TTL_MINUTES = 30;
-const RETRY_DELAY_MS = 1500;
-// gpt-oss-20b sticks to well-formed JSON tool calls far more reliably than
-// the previous default (llama-3.3-70b-versatile), which would intermittently
-// emit a non-JSON pseudo-XML function-call token under this tool-calling
-// workload and get the whole completion rejected by Groq.
-const ASSISTANT_MODEL = 'openai/gpt-oss-20b';
 
 /**
- * The tool-calling loop. The LLM never touches the DB/filesystem — it only
- * ever sees the JSON schemas selectAssistantTools() picked for this message
- * and gets back whatever ToolRegistryService.execute() returns. Gated tools
- * (publishJobPosting,
- * status-changing updateJobPosting) are intercepted here and never actually
- * executed in this loop — see confirmAction().
+ * Thin wrapper around AssistantAgentGraph (the LangGraph tool-calling loop):
+ * builds the role-aware initial prompt/tool set, invokes the graph, then
+ * handles the two things only this service can do — turn a gated tool call
+ * into a PendingAssistantAction row for HR/the manager to confirm, and
+ * write the audit trail on confirm/cancel. The LLM never touches the DB/
+ * filesystem itself — it only ever sees the JSON schemas selectAssistantTools()
+ * picked for this actor's role and gets back whatever ToolRegistryService
+ * returns.
  */
 @Injectable()
 export class AssistantOrchestratorService {
-  private readonly logger = new Logger(AssistantOrchestratorService.name);
-
   constructor(
-    private readonly llm: LlmClientService,
+    private readonly agentGraph: AssistantAgentGraph,
     private readonly toolRegistry: ToolRegistryService,
     private readonly prisma: PrismaService,
     private readonly audit: AuditLogService,
@@ -71,10 +63,11 @@ export class AssistantOrchestratorService {
     history: AssistantMessageInput[],
     userMessage: string,
     actorUserId: string,
+    actorRole: Role,
     attachedFile?: UploadedCv,
   ): Promise<AssistantReply> {
     const messages: ChatMessage[] = [
-      { role: 'system', content: ASSISTANT_SYSTEM_PROMPT },
+      { role: 'system', content: buildAssistantSystemPrompt(actorRole) },
       ...history.map((h): ChatMessage => ({
         role: h.role,
         content: h.content,
@@ -90,97 +83,55 @@ export class AssistantOrchestratorService {
         .filter((m) => m.role !== 'system')
         .map((m) => m.content ?? '')
         .join('\n'),
+      actorRole,
     );
 
-    // The LLM only ever sees this job as JSON in a tool result and paraphrases
-    // it back in prose — tracked separately here so the frontend can render
-    // an actual structured job card instead of relying on that paraphrase.
-    let lastJobPosting: JobPostingWithSkills | undefined;
+    const result = await this.agentGraph.run({
+      messages,
+      tools,
+      actorUserId,
+      actorRole,
+      attachedFile,
+    });
 
-    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-      let message: ChatMessage;
-      try {
-        message = await this.chatWithRetry(messages, tools);
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
-        this.logger.warn(`LLM call failed: ${reason}`);
-        return { reply: describeLlmFailure(reason) };
-      }
-
-      if (!message.tool_calls || message.tool_calls.length === 0) {
-        return { reply: message.content ?? '', jobPosting: lastJobPosting };
-      }
-
-      messages.push(message);
-
-      for (const toolCall of message.tool_calls) {
-        const args = this.toolRegistry.parseArgs(toolCall.function.arguments);
-
-        if (this.toolRegistry.isGated(toolCall.function.name, args)) {
-          const pending = await this.createPendingAction(
-            toolCall.function.name,
-            args,
-            actorUserId,
-          );
-          const description = await this.describeAction(
-            toolCall.function.name,
-            args,
-          );
-          return {
-            reply: `This needs your explicit confirmation before I do it: ${description}. Confirm via the "Confirm" action (id: ${pending.id}), or cancel it.`,
-            pendingAction: {
-              actionId: pending.id,
-              tool: toolCall.function.name,
-              args,
-              expiresAt: pending.expiresAt,
-            },
-            jobPosting: lastJobPosting,
-          };
-        }
-
-        const outcome = await this.toolRegistry.execute(
-          toolCall.function.name,
-          args,
-          {
-            actorUserId,
-            attachedFile:
-              toolCall.function.name === 'uploadCandidateCv'
-                ? attachedFile
-                : undefined,
-          },
-        );
-
-        if (outcome.ok && JOB_POSTING_RESULT_TOOLS.has(toolCall.function.name)) {
-          lastJobPosting = outcome.result as JobPostingWithSkills;
-        }
-
-        messages.push({
-          role: 'tool',
-          tool_call_id: toolCall.id,
-          content: JSON.stringify(outcome.result),
-        });
-      }
+    if (result.gatedAction) {
+      const pending = await this.createPendingAction(
+        result.gatedAction.tool,
+        result.gatedAction.args,
+        actorUserId,
+      );
+      const description = await this.describeAction(
+        result.gatedAction.tool,
+        result.gatedAction.args,
+      );
+      return {
+        reply: `This needs your explicit confirmation before I do it: ${description}. Confirm via the "Confirm" action (id: ${pending.id}), or cancel it.`,
+        pendingAction: {
+          actionId: pending.id,
+          tool: result.gatedAction.tool,
+          args: result.gatedAction.args,
+          expiresAt: pending.expiresAt,
+        },
+        jobPosting: result.lastJobPosting,
+      };
     }
 
-    return {
-      reply:
-        "I wasn't able to finish this within the allowed number of steps — try rephrasing or splitting the request into smaller parts.",
-    };
+    return { reply: result.finalReply ?? '', jobPosting: result.lastJobPosting };
   }
 
   /**
    * Deliberately does not restrict confirmation to `requestedByUserId` —
-   * any HR_ADMIN/SUPER_ADMIN (the only roles with assistant access at all,
-   * per AssistantController's @Roles guard) can confirm or cancel a
-   * pending action a teammate proposed. Treated as intentional (a small
-   * HR team picking up and finishing each other's in-progress work) rather
-   * than a gap; `requestedByUserId` is still recorded so the audit trail
-   * shows who proposed vs. who confirmed. Revisit if/when this needs to be
-   * restricted to the original requester.
+   * any staff account with assistant access can confirm or cancel a pending
+   * action a teammate proposed. Treated as intentional (a small team picking
+   * up and finishing each other's in-progress work) rather than a gap;
+   * `requestedByUserId` is still recorded so the audit trail shows who
+   * proposed vs. who confirmed. Revisit if/when this needs to be restricted
+   * to the original requester.
    */
   async confirmAction(
     actionId: string,
     confirmedByUserId: string,
+    confirmedByRole: Role,
   ): Promise<AssistantReply> {
     const action = await this.prisma.pendingAssistantAction.findUnique({
       where: { id: actionId },
@@ -206,6 +157,7 @@ export class AssistantOrchestratorService {
     const args = action.argsJson as Record<string, unknown>;
     const outcome = await this.toolRegistry.execute(action.tool, args, {
       actorUserId: confirmedByUserId,
+      actorRole: confirmedByRole,
     });
 
     // Only a genuinely successful tool call is recorded as CONFIRMED — a
@@ -266,31 +218,6 @@ export class AssistantOrchestratorService {
     });
   }
 
-  /**
-   * One quiet retry for transient failures (network blip, a momentary 5xx)
-   * so a single hiccup doesn't surface as an error to HR. Skips the retry
-   * for rate limits — Groq's own backoff hint is on the order of several
-   * seconds, far longer than we should block a chat reply for, so retrying
-   * immediately would just fail again for no benefit.
-   */
-  private async chatWithRetry(
-    messages: ChatMessage[],
-    tools: AssistantToolDefinition[],
-  ): Promise<ChatMessage> {
-    const options = { tools, model: ASSISTANT_MODEL };
-    try {
-      return (await this.llm.chat(messages, options)).message;
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      if (/rate_limit_exceeded|429/i.test(reason)) {
-        throw error;
-      }
-      this.logger.warn(`LLM call failed, retrying once: ${reason}`);
-      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
-      return (await this.llm.chat(messages, options)).message;
-    }
-  }
-
   private async createPendingAction(
     tool: string,
     args: Record<string, unknown>,
@@ -312,11 +239,12 @@ export class AssistantOrchestratorService {
 
   /**
    * Resolves the job posting (and its current title/status) server-side
-   * before describing a gated action back to HR — the model's raw arguments
-   * are just a UUID, which gives HR no way to visually confirm they're
-   * about to publish/delete/change the job they actually think they are.
-   * Falls back to the bare id if the job can't be resolved (e.g. it's since
-   * been deleted) rather than failing the description outright.
+   * before describing a gated action back to the actor — the model's raw
+   * arguments are just a UUID, which gives no way to visually confirm
+   * they're about to publish/delete/decide on the job/candidate they
+   * actually think they are. Falls back to the bare id if it can't be
+   * resolved (e.g. since deleted) rather than failing the description
+   * outright.
    */
   private async describeAction(
     tool: string,
@@ -335,6 +263,12 @@ export class AssistantOrchestratorService {
       const changes = args.changes as Record<string, unknown> | undefined;
       return `change job posting ${jobLabel} status to ${String(changes?.status)}`;
     }
+    if (tool === 'decideApplication') {
+      return `record decision "${String(args.decision)}" for candidate ${String(args.candidateId)} on job posting ${jobLabel}`;
+    }
+    if (tool === 'sendOfferLetter') {
+      return `send the offer letter to candidate ${String(args.candidateId)} for job posting ${jobLabel}`;
+    }
     return `${tool}(${JSON.stringify(args)})`;
   }
 
@@ -346,11 +280,4 @@ export class AssistantOrchestratorService {
       return jobPostingId;
     }
   }
-}
-
-function describeLlmFailure(reason: string): string {
-  if (/rate_limit_exceeded|429/i.test(reason)) {
-    return 'The assistant is temporarily rate-limited — please wait a few seconds and try again.';
-  }
-  return 'The assistant is temporarily unavailable — please try again in a moment.';
 }

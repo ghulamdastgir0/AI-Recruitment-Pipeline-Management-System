@@ -8,5 +8,6 @@ import { HiringDecisionsService } from './hiring-decisions.service';
   imports: [JobPostingsModule, CandidateCommentsModule],
   controllers: [HiringDecisionsController],
   providers: [HiringDecisionsService],
+  exports: [HiringDecisionsService],
 })
 export class HiringDecisionsModule {}

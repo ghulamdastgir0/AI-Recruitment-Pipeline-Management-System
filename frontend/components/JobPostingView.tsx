@@ -21,7 +21,7 @@ function SkillChips({ skills }: { skills: string[] }) {
       {skills.map((skill) => (
         <span
           key={skill}
-          className="rounded-full bg-black/5 px-3 py-1 text-sm font-medium text-text-secondary"
+          className="rounded-full bg-surface-muted px-3 py-1 text-sm font-medium text-text-secondary"
         >
           {skill}
         </span>
@@ -55,7 +55,7 @@ export function JobPostingView({ job }: { job: JobPostingViewData }) {
             </span>
           )}
           {job.location && (
-            <span className="rounded-full bg-black/5 px-3 py-1 text-xs font-medium text-text-secondary">
+            <span className="rounded-full bg-surface-muted px-3 py-1 text-xs font-medium text-text-secondary">
               {job.location}
             </span>
           )}

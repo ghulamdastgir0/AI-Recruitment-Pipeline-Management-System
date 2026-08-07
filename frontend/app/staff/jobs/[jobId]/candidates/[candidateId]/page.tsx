@@ -11,6 +11,7 @@ import { Timeline } from "@/components/Timeline";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Dialog } from "@/components/ui/Dialog";
+import { ArrowLeftIcon } from "@/components/ui/icons";
 import { Input, Textarea } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import {
@@ -325,29 +326,23 @@ function CandidateDetail() {
 
   if (forbidden) {
     return (
-      <>
-        <StaffNav />
-        <main className="mx-auto w-full max-w-3xl p-6">
-          <PermissionDeniedState />
-        </main>
-      </>
+      <StaffNav title="Candidate">
+        <PermissionDeniedState />
+      </StaffNav>
     );
   }
 
   return (
-    <>
-      <StaffNav />
-      <main className="mx-auto w-full max-w-3xl px-6 py-8">
+    <StaffNav title={match?.candidateName ?? "Candidate"}>
+      <div className="mx-auto w-full max-w-3xl">
         <Link
           href={`/staff/jobs/${jobId}`}
-          className="text-sm font-medium text-brand-700 hover:underline"
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:underline"
         >
-          ← Back to job
+          <ArrowLeftIcon className="h-3.5 w-3.5" />
+          Back to job
         </Link>
-        <h1 className="mt-2 font-heading text-2xl font-semibold text-text-primary">
-          {match?.candidateName ?? "Candidate"}
-        </h1>
-        <p className="text-sm text-text-muted">
+        <p className="mt-2 text-sm text-text-muted">
           {[match?.candidateEmail, match?.candidatePhone].filter(Boolean).join(" · ") ||
             candidateId}
         </p>
@@ -805,8 +800,8 @@ function CandidateDetail() {
             </Card>
           </section>
         )}
-      </main>
-    </>
+      </div>
+    </StaffNav>
   );
 }
 

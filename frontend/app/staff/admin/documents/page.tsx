@@ -134,7 +134,7 @@ function UploadVersionButton({
 
   return (
     <div className="flex flex-col items-start gap-1">
-      <label className="inline-flex cursor-pointer items-center gap-2 rounded-[var(--radius-control)] border border-brand-200 bg-white px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50">
+      <label className="inline-flex cursor-pointer items-center gap-2 rounded-[var(--radius-control)] border border-brand-200 bg-surface-card px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50">
         {uploading ? "Uploading…" : "Upload New Version"}
         <input
           ref={fileRef}
@@ -217,18 +217,16 @@ function DocumentsAdmin() {
   }
 
   return (
-    <>
-      <StaffNav />
-      <main className="mx-auto w-full max-w-4xl px-6 py-8">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="font-heading text-2xl font-semibold text-text-primary">
-            Company Documents
-          </h1>
-          <Button onClick={() => setShowUpload((v) => !v)}>
-            {showUpload ? "Cancel" : "Upload Document"}
-          </Button>
-        </div>
-        <p className="mt-1 text-sm text-text-muted">
+    <StaffNav
+      title="Documents"
+      actions={
+        <Button onClick={() => setShowUpload((v) => !v)}>
+          {showUpload ? "Cancel" : "Upload Document"}
+        </Button>
+      }
+    >
+      <div className="mx-auto w-full max-w-4xl">
+        <p className="text-sm text-text-muted">
           HR policy and tech-stack documents the recruitment assistant grounds
           its answers and job drafts in.
         </p>
@@ -341,8 +339,8 @@ function DocumentsAdmin() {
             </Card>
           ))}
         </div>
-      </main>
-    </>
+      </div>
+    </StaffNav>
   );
 }
 

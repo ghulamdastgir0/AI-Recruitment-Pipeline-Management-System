@@ -6,19 +6,19 @@
 // candidate-facing label.
 
 const CANDIDATE_STATUS_STYLES: Record<string, string> = {
-  APPLICATION_RECEIVED: "bg-black/5 text-text-secondary",
+  APPLICATION_RECEIVED: "bg-surface-muted text-text-secondary",
   UNDER_REVIEW: "bg-info-soft text-info-text",
   INTERVIEW_PENDING: "bg-warning-soft text-warning-text",
   INTERVIEW_COMPLETED: "bg-info-soft text-info-text",
   FINAL_REVIEW: "bg-info-soft text-info-text",
   ACCEPTED: "bg-success-soft text-success-text",
   REJECTED: "bg-danger-soft text-danger-text",
-  WITHDRAWN: "bg-black/5 text-text-muted",
+  WITHDRAWN: "bg-surface-muted text-text-muted",
 };
 
 const INTERNAL_STATUS_STYLES: Record<string, string> = {
   // Application pipeline
-  APPLIED: "bg-black/5 text-text-secondary",
+  APPLIED: "bg-surface-muted text-text-secondary",
   SCREENING: "bg-info-soft text-info-text",
   SCREENING_REJECTED: "bg-danger-soft text-danger-text",
   INTERVIEW_PENDING: "bg-warning-soft text-warning-text",
@@ -30,23 +30,23 @@ const INTERNAL_STATUS_STYLES: Record<string, string> = {
   SELECTED: "bg-success-soft text-success-text",
   HIRED: "bg-success-soft text-success-text",
   REJECTED: "bg-danger-soft text-danger-text",
-  WITHDRAWN: "bg-black/5 text-text-muted",
+  WITHDRAWN: "bg-surface-muted text-text-muted",
   // Job postings
-  DRAFT: "bg-black/5 text-text-secondary",
+  DRAFT: "bg-surface-muted text-text-secondary",
   PUBLISHED: "bg-success-soft text-success-text",
   PAUSED: "bg-warning-soft text-warning-text",
-  CLOSED: "bg-black/5 text-text-muted",
-  ARCHIVED: "bg-black/5 text-text-muted",
+  CLOSED: "bg-surface-muted text-text-muted",
+  ARCHIVED: "bg-surface-muted text-text-muted",
 };
 
 const DOCUMENT_STATUS_STYLES: Record<string, string> = {
   PROCESSING: "bg-warning-soft text-warning-text",
   ACTIVE: "bg-success-soft text-success-text",
-  INACTIVE: "bg-black/5 text-text-muted",
+  INACTIVE: "bg-surface-muted text-text-muted",
   FAILED: "bg-danger-soft text-danger-text",
 };
 
-const DEFAULT_STYLE = "bg-black/5 text-text-secondary";
+const DEFAULT_STYLE = "bg-surface-muted text-text-secondary";
 
 function Badge({ label, className }: { label: string; className: string }) {
   return (

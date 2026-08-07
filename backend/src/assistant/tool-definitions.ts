@@ -1,8 +1,15 @@
+import type { Role } from '../generated/prisma/enums';
 import type { ToolDefinition } from '../shared/llm/llm-client.types';
+
+const ALL_STAFF_ROLES: Role[] = ['SUPER_ADMIN', 'HR_ADMIN', 'HIRING_MANAGER'];
+const HR_ROLES: Role[] = ['SUPER_ADMIN', 'HR_ADMIN'];
+const MANAGER_ROLES: Role[] = ['HIRING_MANAGER'];
 
 export interface AssistantToolDefinition extends ToolDefinition {
   /** True when this exact call must not execute until HR explicitly confirms (requirement 7). */
   isGated: (args: Record<string, unknown>) => boolean;
+  /** Which staff roles this tool is ever offered to — enforced both when picking the LLM's tool set and again in ToolRegistryService (the assistant bypasses per-route HTTP guards, so this is the only RBAC layer it gets). */
+  requiredRoles: Role[];
 }
 
 const never = () => false;
@@ -22,6 +29,7 @@ const searchCompanyPolicies: AssistantToolDefinition = {
     },
   },
   isGated: never,
+  requiredRoles: HR_ROLES,
 };
 
 const createJobPosting: AssistantToolDefinition = {
@@ -72,6 +80,7 @@ const createJobPosting: AssistantToolDefinition = {
     },
   },
   isGated: never,
+  requiredRoles: HR_ROLES,
 };
 
 const updateJobPosting: AssistantToolDefinition = {
@@ -116,6 +125,7 @@ const updateJobPosting: AssistantToolDefinition = {
     const changes = args.changes as Record<string, unknown> | undefined;
     return !!changes && 'status' in changes;
   },
+  requiredRoles: HR_ROLES,
 };
 
 const publishJobPosting: AssistantToolDefinition = {
@@ -131,6 +141,7 @@ const publishJobPosting: AssistantToolDefinition = {
     },
   },
   isGated: () => true,
+  requiredRoles: HR_ROLES,
 };
 
 const pauseJobPosting: AssistantToolDefinition = {
@@ -146,6 +157,7 @@ const pauseJobPosting: AssistantToolDefinition = {
     },
   },
   isGated: never,
+  requiredRoles: HR_ROLES,
 };
 
 const resumeJobPosting: AssistantToolDefinition = {
@@ -161,6 +173,7 @@ const resumeJobPosting: AssistantToolDefinition = {
     },
   },
   isGated: never,
+  requiredRoles: HR_ROLES,
 };
 
 const deleteJobPosting: AssistantToolDefinition = {
@@ -176,6 +189,7 @@ const deleteJobPosting: AssistantToolDefinition = {
     },
   },
   isGated: () => true,
+  requiredRoles: HR_ROLES,
 };
 
 const findJobPosting: AssistantToolDefinition = {
@@ -193,6 +207,19 @@ const findJobPosting: AssistantToolDefinition = {
     },
   },
   isGated: never,
+  requiredRoles: HR_ROLES,
+};
+
+const listMyJobPostings: AssistantToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'listMyJobPostings',
+    description:
+      "List job postings. For HR/Admin this is every job posting in the company; for a Hiring Manager this is only the job postings they are assigned to. Use this (not findJobPosting) to see what's available to you, or to resolve a job the user referred to by name when you're a Hiring Manager.",
+    parameters: { type: 'object', properties: {} },
+  },
+  isGated: never,
+  requiredRoles: ALL_STAFF_ROLES,
 };
 
 const assignHiringManager: AssistantToolDefinition = {
@@ -214,6 +241,7 @@ const assignHiringManager: AssistantToolDefinition = {
     },
   },
   isGated: never,
+  requiredRoles: HR_ROLES,
 };
 
 const uploadCandidateCv: AssistantToolDefinition = {
@@ -229,6 +257,7 @@ const uploadCandidateCv: AssistantToolDefinition = {
     },
   },
   isGated: never,
+  requiredRoles: HR_ROLES,
 };
 
 const getCandidateProcessingStatus: AssistantToolDefinition = {
@@ -244,6 +273,7 @@ const getCandidateProcessingStatus: AssistantToolDefinition = {
     },
   },
   isGated: never,
+  requiredRoles: HR_ROLES,
 };
 
 const matchCandidateToJob: AssistantToolDefinition = {
@@ -262,6 +292,7 @@ const matchCandidateToJob: AssistantToolDefinition = {
     },
   },
   isGated: never,
+  requiredRoles: HR_ROLES,
 };
 
 const rankCandidatesForJob: AssistantToolDefinition = {
@@ -295,6 +326,7 @@ const rankCandidatesForJob: AssistantToolDefinition = {
     },
   },
   isGated: never,
+  requiredRoles: ALL_STAFF_ROLES,
 };
 
 const getCandidateMatchExplanation: AssistantToolDefinition = {
@@ -313,6 +345,149 @@ const getCandidateMatchExplanation: AssistantToolDefinition = {
     },
   },
   isGated: never,
+  requiredRoles: ALL_STAFF_ROLES,
+};
+
+const getInterviewTranscript: AssistantToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'getInterviewTranscript',
+    description:
+      "Get a candidate's full AI interview transcript, per-skill scores, and grading justifications for a job posting — read this before adding a review comment or making a decision.",
+    parameters: {
+      type: 'object',
+      properties: {
+        candidateId: { type: 'string' },
+        jobPostingId: { type: 'string' },
+      },
+      required: ['candidateId', 'jobPostingId'],
+    },
+  },
+  isGated: never,
+  requiredRoles: ALL_STAFF_ROLES,
+};
+
+const listCandidateComments: AssistantToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'listCandidateComments',
+    description:
+      "List every comment left on a candidate for a job posting (all assigned Hiring Managers' comments, newest first).",
+    parameters: {
+      type: 'object',
+      properties: {
+        candidateId: { type: 'string' },
+        jobPostingId: { type: 'string' },
+      },
+      required: ['candidateId', 'jobPostingId'],
+    },
+  },
+  isGated: never,
+  requiredRoles: ALL_STAFF_ROLES,
+};
+
+const addCandidateComment: AssistantToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'addCandidateComment',
+    description:
+      'Add a feedback comment on a candidate for a job posting you are assigned to. Does not change the application status — use markManagerReviewed to close out your review with a required comment.',
+    parameters: {
+      type: 'object',
+      properties: {
+        candidateId: { type: 'string' },
+        jobPostingId: { type: 'string' },
+        content: { type: 'string' },
+      },
+      required: ['candidateId', 'jobPostingId', 'content'],
+    },
+  },
+  isGated: never,
+  requiredRoles: MANAGER_ROLES,
+};
+
+const markManagerReviewed: AssistantToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'markManagerReviewed',
+    description:
+      "Close out your manager review of a candidate with a required comment, advancing the application to MANAGER_REVIEWED so HR can make a final decision. Only valid while the application is awaiting your review.",
+    parameters: {
+      type: 'object',
+      properties: {
+        candidateId: { type: 'string' },
+        jobPostingId: { type: 'string' },
+        comment: { type: 'string' },
+      },
+      required: ['candidateId', 'jobPostingId', 'comment'],
+    },
+  },
+  isGated: never,
+  requiredRoles: MANAGER_ROLES,
+};
+
+const moveToManagerReview: AssistantToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'moveToManagerReview',
+    description:
+      "Move a candidate whose AI interview just completed into manager review, so the assigned Hiring Manager can leave feedback before you make a final decision. Internal-only — no candidate email.",
+    parameters: {
+      type: 'object',
+      properties: {
+        candidateId: { type: 'string' },
+        jobPostingId: { type: 'string' },
+      },
+      required: ['candidateId', 'jobPostingId'],
+    },
+  },
+  isGated: never,
+  requiredRoles: HR_ROLES,
+};
+
+const decideApplication: AssistantToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'decideApplication',
+    description:
+      "Select, reject, or advance a candidate to a further interview round. Only valid once the application is MANAGER_REVIEWED. Sends the matching email to the candidate automatically — always requires explicit HR confirmation. nextRoundTime/nextRoundDeadline are required for NEXT_ROUND (ISO 8601).",
+    parameters: {
+      type: 'object',
+      properties: {
+        candidateId: { type: 'string' },
+        jobPostingId: { type: 'string' },
+        decision: {
+          type: 'string',
+          enum: ['SELECTED', 'NEXT_ROUND', 'REJECTED'],
+        },
+        nextRoundTime: { type: 'string' },
+        nextRoundDeadline: { type: 'string' },
+      },
+      required: ['candidateId', 'jobPostingId', 'decision'],
+    },
+  },
+  isGated: () => true,
+  requiredRoles: HR_ROLES,
+};
+
+const sendOfferLetter: AssistantToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'sendOfferLetter',
+    description:
+      'Send the offer letter email to a SELECTED candidate, moving the application to HIRED. Cannot be undone — always requires explicit HR confirmation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        candidateId: { type: 'string' },
+        jobPostingId: { type: 'string' },
+        offerDetails: { type: 'string' },
+      },
+      required: ['candidateId', 'jobPostingId'],
+    },
+  },
+  isGated: () => true,
+  requiredRoles: HR_ROLES,
 };
 
 /** Every tool that exists — the source of truth for dispatch/gating lookups (findToolDefinition). Never send this whole list to the LLM in one call; use selectAssistantTools instead. */
@@ -325,12 +500,20 @@ export const ASSISTANT_TOOLS: AssistantToolDefinition[] = [
   resumeJobPosting,
   deleteJobPosting,
   findJobPosting,
+  listMyJobPostings,
   assignHiringManager,
   uploadCandidateCv,
   getCandidateProcessingStatus,
   matchCandidateToJob,
   rankCandidatesForJob,
   getCandidateMatchExplanation,
+  getInterviewTranscript,
+  listCandidateComments,
+  addCandidateComment,
+  markManagerReviewed,
+  moveToManagerReview,
+  decideApplication,
+  sendOfferLetter,
 ];
 
 // ─── Responsibility groups ──────────────────────────────────────────────
@@ -344,6 +527,7 @@ export const POLICY_TOOLS: AssistantToolDefinition[] = [searchCompanyPolicies];
 
 export const JOB_POSTING_TOOLS: AssistantToolDefinition[] = [
   findJobPosting,
+  listMyJobPostings,
   createJobPosting,
   updateJobPosting,
   publishJobPosting,
@@ -356,9 +540,25 @@ export const JOB_POSTING_TOOLS: AssistantToolDefinition[] = [
 
 export const CANDIDATE_TOOLS: AssistantToolDefinition[] = [
   findJobPosting, // candidate tools are always scoped to a job posting by id
+  listMyJobPostings,
   uploadCandidateCv,
   getCandidateProcessingStatus,
   matchCandidateToJob,
+  rankCandidatesForJob,
+  getCandidateMatchExplanation,
+];
+
+/** Post-interview review: manager feedback/comments, transcripts, and HR's final decision/offer — shared by both roles, individually gated down to what each can actually call via requiredRoles. */
+export const REVIEW_TOOLS: AssistantToolDefinition[] = [
+  listMyJobPostings,
+  findJobPosting,
+  getInterviewTranscript,
+  listCandidateComments,
+  addCandidateComment,
+  markManagerReviewed,
+  moveToManagerReview,
+  decideApplication,
+  sendOfferLetter,
   rankCandidatesForJob,
   getCandidateMatchExplanation,
 ];
@@ -420,29 +620,54 @@ const TOOL_GROUPS: ToolGroup[] = [
     ],
     tools: CANDIDATE_TOOLS,
   },
+  {
+    keywords: [
+      /\bcomment(?:s|ed|ing)?\b/i,
+      /\breview(?:s|ed|ing)?\b/i,
+      /\btranscript\b/i,
+      /\binterview(?:s|ed|ing)?\b/i,
+      /\bdecision\b/i,
+      /\bdecide[ds]?\b/i,
+      /\boffer(?:s|ed|ing)?\b/i,
+      /\bhire[ds]?\b/i,
+      /\breject(?:s|ed|ing)?\b/i,
+      /\bselect(?:s|ed|ing)?\b/i,
+      /\badvance[ds]?\b/i,
+    ],
+    tools: REVIEW_TOOLS,
+  },
 ];
 
 /**
  * Picks the smallest tool set that plausibly covers the conversation instead
- * of always sending all 14 schemas. Matches on keywords across the full
- * context text (history + latest message) so a short follow-up like "yes,
- * resume it" still resolves against a role mentioned earlier. Falls back to
- * every tool only when nothing matches, so an unrecognized phrasing never
- * loses functionality — it just costs more tokens for that one call.
+ * of always sending every schema. First narrows to whatever this actor's
+ * role is even allowed to call (the assistant bypasses per-route HTTP
+ * guards, so this is the only RBAC layer it gets — see requiredRoles),
+ * then matches keywords across the full context text (history + latest
+ * message) so a short follow-up like "yes, resume it" still resolves
+ * against a role mentioned earlier. Falls back to every tool this role can
+ * access when nothing matches, so an unrecognized phrasing never loses
+ * functionality — it just costs more tokens for that one call.
  */
 export function selectAssistantTools(
   contextText: string,
+  actorRole: Role,
 ): AssistantToolDefinition[] {
+  const allowedForRole = ASSISTANT_TOOLS.filter((tool) =>
+    tool.requiredRoles.includes(actorRole),
+  );
+
   const matchedGroups = TOOL_GROUPS.filter((group) =>
     group.keywords.some((keyword) => keyword.test(contextText)),
   );
-  if (matchedGroups.length === 0) return ASSISTANT_TOOLS;
+  if (matchedGroups.length === 0) return allowedForRole;
 
+  const allowedNames = new Set(allowedForRole.map((t) => t.function.name));
   const seen = new Set<string>();
   const tools: AssistantToolDefinition[] = [];
   for (const group of matchedGroups) {
     for (const tool of group.tools) {
-      if (!seen.has(tool.function.name)) {
+      if (allowedNames.has(tool.function.name) && !seen.has(tool.function.name)) {
         seen.add(tool.function.name);
         tools.push(tool);
       }

@@ -11,11 +11,16 @@ import { WarningManager } from "@/lib/monitoring/warningManager";
 import { ViolationSummary, ViolationType } from "@/lib/monitoring/violationTypes";
 import { useEyeTracking, EyeTrackingState } from "@/hooks/useEyeTracking";
 
-const FACE_MISSING_MS = 5_000;
-const LOOKING_AWAY_MS = 10_000;
-const LOOKING_AWAY_RADIANS = 0.35; // ~20 degrees — coarse "away from screen" threshold
+// Slightly loosened from the original 5s/10s/0.35rad/10s — real usage showed
+// these firing on brief, ordinary movement (glancing down to type, a quick
+// stretch) rather than actual attempts to cheat. Still tight enough to catch
+// a sustained absence/away-glance/second person, just with a bit more
+// tolerance before a warning fires.
+const FACE_MISSING_MS = 7_000;
+const LOOKING_AWAY_MS = 12_000;
+const LOOKING_AWAY_RADIANS = 0.4; // ~23 degrees — coarse "away from screen" threshold
 const MOBILE_CONSECUTIVE_FRAMES = 3;
-const MULTIPLE_FACES_COOLDOWN_MS = 10_000;
+const MULTIPLE_FACES_COOLDOWN_MS = 12_000;
 // Originally bumped from 500ms to 80ms (~12Hz) to chase the "10-15 FPS"
 // spec target for eye tracking, but detectForVideo() runs synchronously on
 // the main thread — at that rate it started starving the socket/audio
