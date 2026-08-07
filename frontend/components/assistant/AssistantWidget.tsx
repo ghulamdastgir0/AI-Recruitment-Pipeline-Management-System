@@ -5,19 +5,27 @@ import { FormattedMessage } from "@/components/assistant/FormattedMessage";
 import { JobPostingCard, type JobPostingSummary } from "@/components/assistant/JobPostingCard";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { apiFetch, ApiError, postJson } from "@/lib/api";
+import { ApiError, postFormStream, postJson } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+
+interface ToolStep {
+  tool: string;
+  label: string;
+  status: "running" | "done";
+}
 
 interface ChatTurn {
   role: "user" | "assistant";
   content: string;
   jobPosting?: JobPostingSummary;
+  /** Live tool-call progress this turn went through — kept on the finished turn too, so the history still shows what the assistant did to get there. */
+  steps?: ToolStep[];
 }
 
 interface PendingAction {
   actionId: string;
-  tool: string;
-  args: Record<string, unknown>;
+  /** Plain-English description of what confirming will do — never a raw tool name/id/args blob. */
+  description: string;
   expiresAt: string;
 }
 
@@ -26,6 +34,12 @@ interface AssistantReply {
   pendingAction?: PendingAction;
   jobPosting?: JobPostingSummary;
 }
+
+/** Matches backend AssistantStreamEvent (assistant/assistant-stream-event.ts) — kept as a local literal type since the frontend doesn't share types with the backend. */
+type StreamEvent =
+  | { type: "tool"; tool: string; phase: "start" | "end"; label: string }
+  | ({ type: "final" } & AssistantReply)
+  | { type: "error"; message: string };
 
 function BotIcon({ className }: { className?: string }) {
   return (
@@ -51,6 +65,55 @@ function BotIcon({ className }: { className?: string }) {
   );
 }
 
+function SpinnerIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <circle
+        cx="12"
+        cy="12"
+        r="9"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeDasharray="42"
+        strokeDashoffset="14"
+        opacity="0.85"
+      />
+    </svg>
+  );
+}
+
+function CheckIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M5 13l4 4L19 7" />
+    </svg>
+  );
+}
+
+/** One "✓ Searched policies…" / "⟳ Ranking candidates…" line in the live tool-progress checklist. */
+function ToolStepRow({ step }: { step: ToolStep }) {
+  return (
+    <div className="flex items-center gap-1.5 text-xs italic text-text-muted">
+      {step.status === "running" ? (
+        <SpinnerIcon className="h-3 w-3 shrink-0 animate-spin text-brand-600" />
+      ) : (
+        <CheckIcon className="h-3 w-3 shrink-0 text-emerald-500" />
+      )}
+      <span>{step.label}</span>
+    </div>
+  );
+}
+
 /**
  * Floating chat entry point for the recruitment assistant, replacing the old
  * dedicated /staff/assistant page. Rendered once by StaffNav (present at the
@@ -66,13 +129,14 @@ export function AssistantWidget() {
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [sending, setSending] = useState(false);
+  const [liveSteps, setLiveSteps] = useState<ToolStep[]>([]);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [turns, pendingAction, open]);
+  }, [turns, pendingAction, liveSteps, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -103,6 +167,7 @@ export function AssistantWidget() {
     if (!message) return;
     setSending(true);
     setError(null);
+    setLiveSteps([]);
     const attachedLabel = attachedFile ? ` (attached: ${attachedFile.name})` : "";
     const nextTurns = [
       ...turns,
@@ -115,20 +180,63 @@ export function AssistantWidget() {
       form.append("message", message);
       form.append("history", JSON.stringify(turns));
       if (attachedFile) form.append("file", attachedFile);
-      const result = await apiFetch<AssistantReply>("/assistant/message", {
-        method: "POST",
-        body: form,
-      });
+
+      const response = await postFormStream("/assistant/message", form);
+      const steps: ToolStep[] = [];
+      let final: (AssistantReply & { type: "final" }) | null = null;
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (reader) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        let newlineIndex = buffer.indexOf("\n");
+        while (newlineIndex !== -1) {
+          const line = buffer.slice(0, newlineIndex).trim();
+          buffer = buffer.slice(newlineIndex + 1);
+          newlineIndex = buffer.indexOf("\n");
+          if (!line) continue;
+
+          const streamEvent = JSON.parse(line) as StreamEvent;
+          if (streamEvent.type === "tool") {
+            if (streamEvent.phase === "start") {
+              steps.push({ tool: streamEvent.tool, label: streamEvent.label, status: "running" });
+            } else {
+              const running = [...steps].reverse().find(
+                (s) => s.tool === streamEvent.tool && s.status === "running",
+              );
+              if (running) running.status = "done";
+            }
+            setLiveSteps([...steps]);
+          } else if (streamEvent.type === "final") {
+            final = streamEvent;
+          } else if (streamEvent.type === "error") {
+            throw new Error(streamEvent.message);
+          }
+        }
+      }
+
+      if (!final) throw new Error("The assistant didn't return a reply.");
+      const finishedSteps = steps.map((s) => ({ ...s, status: "done" as const }));
       setTurns([
         ...nextTurns,
-        { role: "assistant", content: result.reply, jobPosting: result.jobPosting },
+        {
+          role: "assistant",
+          content: final.reply,
+          jobPosting: final.jobPosting,
+          steps: finishedSteps,
+        },
       ]);
-      setPendingAction(result.pendingAction ?? null);
+      setPendingAction(final.pendingAction ?? null);
       setAttachedFile(null);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to send message.");
+      setError(err instanceof Error ? err.message : "Failed to send message.");
     } finally {
       setSending(false);
+      setLiveSteps([]);
     }
   }
 
@@ -231,7 +339,16 @@ export function AssistantWidget() {
                   }
                 >
                   {turn.role === "assistant" ? (
-                    <FormattedMessage content={turn.content} />
+                    <div className="flex flex-col gap-1.5">
+                      {turn.steps && turn.steps.length > 0 && (
+                        <div className="flex flex-col gap-1 border-b border-border/60 pb-1.5">
+                          {turn.steps.map((step, stepIndex) => (
+                            <ToolStepRow key={stepIndex} step={step} />
+                          ))}
+                        </div>
+                      )}
+                      <FormattedMessage content={turn.content} />
+                    </div>
                   ) : (
                     <span className="whitespace-pre-wrap">{turn.content}</span>
                   )}
@@ -244,14 +361,25 @@ export function AssistantWidget() {
               </div>
             ))}
 
+            {sending && (
+              <div className="max-w-[90%] self-start rounded-2xl rounded-bl-sm bg-surface-muted px-3.5 py-2 text-sm text-text-primary">
+                <div className="flex flex-col gap-1">
+                  {liveSteps.length === 0 ? (
+                    <ToolStepRow step={{ tool: "", label: "Thinking…", status: "running" }} />
+                  ) : (
+                    liveSteps.map((step, stepIndex) => (
+                      <ToolStepRow key={stepIndex} step={step} />
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
             {pendingAction && (
               <div className="max-w-[90%] self-start rounded-[var(--radius-control)] border border-warning/40 bg-warning-soft p-3 text-sm">
-                <p className="font-medium text-warning-text">
-                  Confirm action: {pendingAction.tool}
+                <p className="text-warning-text">
+                  Please confirm: <span className="font-medium">{pendingAction.description}</span>
                 </p>
-                <pre className="mt-1 overflow-x-auto text-xs text-warning-text">
-                  {JSON.stringify(pendingAction.args, null, 2)}
-                </pre>
                 <div className="mt-2 flex gap-2">
                   <Button
                     onClick={confirmAction}

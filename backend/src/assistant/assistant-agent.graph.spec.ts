@@ -155,7 +155,8 @@ describe('AssistantAgentGraph', () => {
       finishReason: 'tool_calls',
     });
 
-    const result = await graph.run(baseInput);
+    const onToolEvent = jest.fn();
+    const result = await graph.run({ ...baseInput, onToolEvent });
 
     expect(toolRegistry.execute).not.toHaveBeenCalled();
     expect(result.gatedAction).toEqual({
@@ -163,6 +164,48 @@ describe('AssistantAgentGraph', () => {
       args: { jobPostingId: 'job-1' },
     });
     expect(result.finalReply).toBeUndefined();
+    // A gated call never actually executes here, so it never gets a live
+    // progress step — only the confirmation card the orchestrator builds.
+    expect(onToolEvent).not.toHaveBeenCalled();
+  });
+
+  it('fires a start/end progress event around each executed (non-gated) tool call', async () => {
+    const { graph, gemini, toolRegistry } = buildGraph();
+    gemini.chat
+      .mockResolvedValueOnce({
+        message: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'call-1',
+              type: 'function',
+              function: {
+                name: 'searchCompanyPolicies',
+                arguments: '{"query":"parental leave"}',
+              },
+            },
+          ],
+        },
+        finishReason: 'tool_calls',
+      })
+      .mockResolvedValueOnce({
+        message: { role: 'assistant', content: 'Parental leave is 16 weeks.' },
+        finishReason: 'stop',
+      });
+    toolRegistry.execute.mockResolvedValue({ ok: true, result: { results: [] } });
+    const onToolEvent = jest.fn();
+
+    await graph.run({ ...baseInput, onToolEvent });
+
+    expect(onToolEvent).toHaveBeenNthCalledWith(1, {
+      tool: 'searchCompanyPolicies',
+      phase: 'start',
+    });
+    expect(onToolEvent).toHaveBeenNthCalledWith(2, {
+      tool: 'searchCompanyPolicies',
+      phase: 'end',
+    });
   });
 
   it('binds an attached CV file only to the uploadCandidateCv tool call', async () => {

@@ -681,3 +681,39 @@ export function findToolDefinition(
 ): AssistantToolDefinition | undefined {
   return ASSISTANT_TOOLS.find((tool) => tool.function.name === name);
 }
+
+/**
+ * Present-continuous, user-facing label shown as a live "doing X…" step
+ * while a tool call is in flight (see AssistantAgentGraph/AssistantWidget).
+ * Purely cosmetic — never used for dispatch/gating — so a tool missing an
+ * entry here still works, it just falls back to a generic label instead of
+ * failing.
+ */
+const TOOL_PROGRESS_LABELS: Record<string, string> = {
+  searchCompanyPolicies: 'Searching company policies…',
+  createJobPosting: 'Creating the job posting…',
+  updateJobPosting: 'Updating the job posting…',
+  publishJobPosting: 'Publishing the job posting…',
+  pauseJobPosting: 'Pausing the job posting…',
+  resumeJobPosting: 'Resuming the job posting…',
+  deleteJobPosting: 'Deleting the job posting…',
+  findJobPosting: 'Looking up job postings…',
+  listMyJobPostings: 'Listing job postings…',
+  assignHiringManager: 'Assigning the Hiring Manager…',
+  uploadCandidateCv: 'Processing the CV…',
+  getCandidateProcessingStatus: 'Checking CV processing status…',
+  matchCandidateToJob: 'Scoring the candidate…',
+  rankCandidatesForJob: 'Ranking candidates…',
+  getCandidateMatchExplanation: 'Pulling match evidence…',
+  getInterviewTranscript: 'Reading the interview transcript…',
+  listCandidateComments: 'Loading candidate comments…',
+  addCandidateComment: 'Posting your comment…',
+  markManagerReviewed: 'Recording your review…',
+  moveToManagerReview: 'Moving candidate to manager review…',
+  decideApplication: 'Recording the decision…',
+  sendOfferLetter: 'Sending the offer letter…',
+};
+
+export function getToolProgressLabel(toolName: string): string {
+  return TOOL_PROGRESS_LABELS[toolName] ?? 'Working…';
+}

@@ -6,6 +6,7 @@ import {
   Param,
   ParseFilePipeBuilder,
   Post,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -19,6 +20,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -30,7 +32,9 @@ import {
   AssistantOrchestratorService,
   AssistantReply,
 } from './assistant-orchestrator.service';
+import { AssistantStreamEvent } from './assistant-stream-event';
 import { AskAssistantDto } from './dto/ask-assistant.dto';
+import { getToolProgressLabel } from './tool-definitions';
 
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
@@ -84,7 +88,8 @@ export class AssistantController {
   @ApiResponse({
     status: 200,
     description:
-      'Assistant reply, optionally with a pendingAction requiring confirmation.',
+      'Newline-delimited JSON stream: zero or more {"type":"tool",...} progress events (live status while a tool call is in flight) ' +
+      'followed by exactly one {"type":"final",...AssistantReply} or {"type":"error",...} event.',
   })
   @UseInterceptors(
     FileInterceptor('file', {
@@ -97,15 +102,43 @@ export class AssistantController {
     @UploadedFile(optionalPdfValidationPipe)
     file: Express.Multer.File | undefined,
     @CurrentUser() user: AuthenticatedUser,
-  ): Promise<AssistantReply> {
+    @Res() res: Response,
+  ): Promise<void> {
+    // parseHistory can still throw a normal BadRequestException here — this
+    // runs before any header is written, so Nest's default exception filter
+    // handles it as an ordinary JSON error response, not a broken stream.
     const history = parseHistory(body.history);
-    return this.orchestrator.handleMessage(
-      history,
-      body.message,
-      user.id,
-      user.role,
-      file,
-    );
+
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    res.setHeader('Cache-Control', 'no-cache');
+    const writeEvent = (event: AssistantStreamEvent) => {
+      res.write(JSON.stringify(event) + '\n');
+    };
+
+    try {
+      const reply = await this.orchestrator.handleMessage(
+        history,
+        body.message,
+        user.id,
+        user.role,
+        file,
+        (toolEvent) =>
+          writeEvent({
+            type: 'tool',
+            tool: toolEvent.tool,
+            phase: toolEvent.phase,
+            label: getToolProgressLabel(toolEvent.tool),
+          }),
+      );
+      writeEvent({ type: 'final', ...reply });
+    } catch (error) {
+      writeEvent({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Unknown error.',
+      });
+    } finally {
+      res.end();
+    }
   }
 
   @Post('actions/:id/confirm')

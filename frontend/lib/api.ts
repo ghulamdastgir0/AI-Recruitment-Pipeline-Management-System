@@ -80,6 +80,47 @@ export function postForm<T>(path: string, form: FormData): Promise<T> {
   return apiFetch<T>(path, { method: "POST", body: form });
 }
 
+/**
+ * Like postForm, but hands back the raw Response instead of parsing the
+ * whole body as JSON — for endpoints that stream newline-delimited JSON
+ * (the assistant's live tool-progress feed). A non-2xx response is still a
+ * single ordinary JSON error body (the stream only starts once the request
+ * is accepted), so that case is parsed and thrown exactly like apiFetch.
+ */
+export async function postFormStream(
+  path: string,
+  form: FormData,
+): Promise<Response> {
+  const headers = new Headers();
+  if (typeof window !== "undefined") {
+    const token = window.localStorage.getItem("token");
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers,
+    body: form,
+  });
+
+  if (!response.ok) {
+    let message = response.statusText || `Request failed (${response.status})`;
+    let body: unknown;
+    try {
+      body = await response.json();
+      if (body && typeof body === "object" && "message" in body) {
+        const raw = (body as { message: unknown }).message;
+        message = Array.isArray(raw) ? raw.join(", ") : String(raw);
+      }
+    } catch {
+      // non-JSON error body — keep the status text fallback
+    }
+    throw new ApiError(response.status, message, body);
+  }
+
+  return response;
+}
+
 export function deleteRequest<T>(path: string): Promise<T> {
   return apiFetch<T>(path, { method: "DELETE" });
 }

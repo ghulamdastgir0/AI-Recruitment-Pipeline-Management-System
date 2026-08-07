@@ -40,7 +40,7 @@ export function Timeline({ status }: { status: string }) {
   const isTerminal = TERMINAL_STATUSES.has(status);
 
   return (
-    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-0">
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:gap-0">
       {STAGES.map((label, index) => {
         const isPast = index < currentIndex;
         const isCurrent = index === currentIndex;
@@ -66,23 +66,26 @@ export function Timeline({ status }: { status: string }) {
         return (
           <div
             key={label}
-            className="flex flex-1 items-center gap-2 sm:flex-col sm:gap-1"
+            className="flex items-center gap-2 sm:flex-1 sm:flex-col sm:items-stretch sm:gap-1"
           >
-            <div className="flex items-center gap-2 sm:flex-col sm:gap-1">
+            {/* Dot and connector line share one row (at the dot's vertical
+                center) — the label goes below, as its own block, so it never
+                pushes the connector out of line with the dots. */}
+            <div className="flex items-center sm:w-full">
               <span
                 className={`h-3 w-3 shrink-0 rounded-full ${dotClass}`}
                 aria-hidden
               />
-              <span className={`text-xs ${textClass}`}>{label}</span>
+              {index < STAGES.length - 1 && (
+                <span
+                  className={`hidden h-px flex-1 sm:block ${
+                    isPast ? "bg-success" : "bg-border"
+                  }`}
+                  aria-hidden
+                />
+              )}
             </div>
-            {index < STAGES.length - 1 && (
-              <span
-                className={`hidden h-px flex-1 sm:block ${
-                  isPast ? "bg-success" : "bg-border"
-                }`}
-                aria-hidden
-              />
-            )}
+            <span className={`text-xs ${textClass}`}>{label}</span>
           </div>
         );
       })}

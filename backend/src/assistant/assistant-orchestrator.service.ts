@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AuditLogService } from '../audit/audit-log.service';
+import { resolveCandidateIdentity } from '../candidates/candidate-identity.util';
 import { UploadedCv } from '../candidates/services/cv-upload.service';
 import type { Role } from '../generated/prisma/enums';
 import {
@@ -12,7 +13,7 @@ import {
 } from '../job-postings/job-postings.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ChatMessage } from '../shared/llm/llm-client.types';
-import { AssistantAgentGraph } from './assistant-agent.graph';
+import { AssistantAgentGraph, ToolProgressEvent } from './assistant-agent.graph';
 import { buildAssistantSystemPrompt } from './system-prompt';
 import { selectAssistantTools } from './tool-definitions';
 import { ToolRegistryService } from './tool-registry.service';
@@ -24,8 +25,8 @@ export interface AssistantMessageInput {
 
 export interface PendingActionPreview {
   actionId: string;
-  tool: string;
-  args: Record<string, unknown>;
+  /** Plain-English description of what confirming will do — no tool name, id, or raw args; those are internal plumbing a human doesn't need to see. */
+  description: string;
   expiresAt: Date;
 }
 
@@ -65,6 +66,7 @@ export class AssistantOrchestratorService {
     actorUserId: string,
     actorRole: Role,
     attachedFile?: UploadedCv,
+    onToolEvent?: (event: ToolProgressEvent) => void,
   ): Promise<AssistantReply> {
     const messages: ChatMessage[] = [
       { role: 'system', content: buildAssistantSystemPrompt(actorRole) },
@@ -92,6 +94,7 @@ export class AssistantOrchestratorService {
       actorUserId,
       actorRole,
       attachedFile,
+      onToolEvent,
     });
 
     if (result.gatedAction) {
@@ -105,11 +108,14 @@ export class AssistantOrchestratorService {
         result.gatedAction.args,
       );
       return {
-        reply: `This needs your explicit confirmation before I do it: ${description}. Confirm via the "Confirm" action (id: ${pending.id}), or cancel it.`,
+        // No pending-action id, tool name, or raw args in the prose — those
+        // are internal plumbing (the frontend already carries actionId
+        // structurally via pendingAction.actionId for the Confirm/Cancel
+        // buttons) and have no business being read by a human.
+        reply: `This needs your explicit confirmation before I do it: ${description}.`,
         pendingAction: {
           actionId: pending.id,
-          tool: result.gatedAction.tool,
-          args: result.gatedAction.args,
+          description,
           expiresAt: pending.expiresAt,
         },
         jobPosting: result.lastJobPosting,
@@ -238,13 +244,15 @@ export class AssistantOrchestratorService {
   }
 
   /**
-   * Resolves the job posting (and its current title/status) server-side
+   * Resolves the job posting/candidate (title/status/name only) server-side
    * before describing a gated action back to the actor — the model's raw
-   * arguments are just a UUID, which gives no way to visually confirm
-   * they're about to publish/delete/decide on the job/candidate they
-   * actually think they are. Falls back to the bare id if it can't be
-   * resolved (e.g. since deleted) rather than failing the description
-   * outright.
+   * arguments are just UUIDs, which give no way to visually confirm they're
+   * about to publish/delete/decide on the job/candidate they actually think
+   * they are. Deliberately never surfaces a raw id, tool name, or JSON blob
+   * in the returned string — this is read by HR/a Hiring Manager, not a
+   * developer. Falls back to a generic noun ("the job posting"/"the
+   * candidate") if a lookup fails (e.g. since deleted) rather than falling
+   * back to the id.
    */
   private async describeAction(
     tool: string,
@@ -252,9 +260,14 @@ export class AssistantOrchestratorService {
   ): Promise<string> {
     const jobPostingId =
       typeof args.jobPostingId === 'string' ? args.jobPostingId : undefined;
+    const candidateId =
+      typeof args.candidateId === 'string' ? args.candidateId : undefined;
     const jobLabel = jobPostingId
       ? await this.describeJobPosting(jobPostingId)
-      : undefined;
+      : 'the job posting';
+    const candidateLabel = candidateId
+      ? await this.describeCandidate(candidateId)
+      : 'the candidate';
 
     if (tool === 'publishJobPosting') return `publish job posting ${jobLabel}`;
     if (tool === 'deleteJobPosting')
@@ -264,20 +277,47 @@ export class AssistantOrchestratorService {
       return `change job posting ${jobLabel} status to ${String(changes?.status)}`;
     }
     if (tool === 'decideApplication') {
-      return `record decision "${String(args.decision)}" for candidate ${String(args.candidateId)} on job posting ${jobLabel}`;
+      const decisionLabel = DECISION_LABELS[String(args.decision)] ?? String(args.decision);
+      return `${decisionLabel} ${candidateLabel} for job posting ${jobLabel}`;
     }
     if (tool === 'sendOfferLetter') {
-      return `send the offer letter to candidate ${String(args.candidateId)} for job posting ${jobLabel}`;
+      return `send the offer letter to ${candidateLabel} for job posting ${jobLabel}`;
     }
-    return `${tool}(${JSON.stringify(args)})`;
+    // Generic fallback for any future gated tool that doesn't have a
+    // dedicated phrasing above yet — humanized from the tool name, never a
+    // raw dump of args (which could contain other internal ids).
+    return humanizeToolName(tool);
   }
 
   private async describeJobPosting(jobPostingId: string): Promise<string> {
     try {
       const job = await this.jobPostings.getById(jobPostingId);
-      return `"${job.title}" (currently ${job.status}, id ${jobPostingId})`;
+      return `"${job.title}" (currently ${job.status.toLowerCase()})`;
     } catch {
-      return jobPostingId;
+      return 'the job posting';
     }
   }
+
+  private async describeCandidate(candidateId: string): Promise<string> {
+    try {
+      const profile = await this.prisma.candidateProfile.findUnique({
+        where: { id: candidateId },
+      });
+      if (!profile) return 'the candidate';
+      const { name } = resolveCandidateIdentity(profile);
+      return name ?? 'the candidate';
+    } catch {
+      return 'the candidate';
+    }
+  }
+}
+
+const DECISION_LABELS: Record<string, string> = {
+  SELECTED: 'select',
+  NEXT_ROUND: 'advance to another round',
+  REJECTED: 'reject',
+};
+
+function humanizeToolName(tool: string): string {
+  return tool.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
 }

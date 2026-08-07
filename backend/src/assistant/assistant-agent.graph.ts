@@ -13,12 +13,19 @@ export interface GatedAction {
   args: Record<string, unknown>;
 }
 
+/** Fired around each non-gated tool call so the UI can show a live "doing X…" step; a gated call never fires one (it never actually executes here — see the tools node). */
+export interface ToolProgressEvent {
+  tool: string;
+  phase: 'start' | 'end';
+}
+
 export interface AssistantAgentInput {
   messages: ChatMessage[];
   tools: AssistantToolDefinition[];
   actorUserId: string;
   actorRole: Role;
   attachedFile?: UploadedCv;
+  onToolEvent?: (event: ToolProgressEvent) => void;
 }
 
 export interface AssistantAgentResult {
@@ -48,6 +55,7 @@ const AgentState = Annotation.Root({
   actorUserId: Annotation<string>,
   actorRole: Annotation<Role>,
   attachedFile: Annotation<UploadedCv | undefined>,
+  onToolEvent: Annotation<((event: ToolProgressEvent) => void) | undefined>,
   iteration: Annotation<number>,
   lastJobPosting: Annotation<JobPostingWithSkills | undefined>,
   gatedAction: Annotation<GatedAction | undefined>,
@@ -83,6 +91,7 @@ export class AssistantAgentGraph {
       actorUserId: input.actorUserId,
       actorRole: input.actorRole,
       attachedFile: input.attachedFile,
+      onToolEvent: input.onToolEvent,
       iteration: 0,
     });
 
@@ -163,6 +172,7 @@ export class AssistantAgentGraph {
           };
         }
 
+        state.onToolEvent?.({ tool: toolCall.function.name, phase: 'start' });
         const outcome = await this.toolRegistry.execute(
           toolCall.function.name,
           args,
@@ -175,6 +185,7 @@ export class AssistantAgentGraph {
                 : undefined,
           },
         );
+        state.onToolEvent?.({ tool: toolCall.function.name, phase: 'end' });
 
         if (outcome.ok && JOB_POSTING_RESULT_TOOLS.has(toolCall.function.name)) {
           lastJobPosting = outcome.result as JobPostingWithSkills;

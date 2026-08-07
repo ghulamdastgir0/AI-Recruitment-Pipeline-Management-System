@@ -115,10 +115,10 @@ describe('AssistantOrchestratorService', () => {
       );
 
       expect(toolRegistry.execute).not.toHaveBeenCalled();
-      expect(result.pendingAction).toMatchObject({
-        actionId: 'action-1',
-        tool: 'publishJobPosting',
-      });
+      expect(result.pendingAction).toMatchObject({ actionId: 'action-1' });
+      // No tool name, id, or raw args leaked into the human-facing description.
+      expect(result.pendingAction?.description).not.toContain('publishJobPosting');
+      expect(result.pendingAction?.description).not.toContain('job-1');
       expect(result.reply).toContain('confirmation');
     });
 

@@ -2,10 +2,18 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { AssistantWidget } from "@/components/assistant/AssistantWidget";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
-import { BriefcaseIcon, DocumentsIcon, LogoutIcon, UserIcon, UsersIcon } from "@/components/ui/icons";
+import {
+  BriefcaseIcon,
+  CloseIcon,
+  DocumentsIcon,
+  LogoutIcon,
+  MenuIcon,
+  UserIcon,
+  UsersIcon,
+} from "@/components/ui/icons";
 import { useAuth } from "@/lib/auth";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -60,6 +68,14 @@ export function StaffNav({
 }) {
   const { user, logout } = useAuth();
   const pathname = usePathname();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // Route changes (clicking a nav link) should close the off-canvas drawer
+  // on narrow viewports instead of leaving it open over the new page.
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [pathname]);
+
   if (!user) return null;
 
   const isSuperAdmin = user.role === "SUPER_ADMIN";
@@ -68,18 +84,40 @@ export function StaffNav({
 
   return (
     <div className="flex h-screen overflow-hidden bg-surface">
-      <aside className="flex h-full w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface-card">
-        <Link href="/staff" className="flex items-center gap-2.5 px-5 py-5">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-xs font-bold text-white">
-            AI
-          </span>
-          <span className="leading-tight">
-            <span className="block font-heading text-sm font-semibold text-text-primary">
-              Recruitment Pipeline
+      {mobileNavOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/40 lg:hidden"
+          onClick={() => setMobileNavOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex h-full w-60 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface-card transition-transform duration-200 lg:static lg:translate-x-0 ${
+          mobileNavOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2.5 px-5 py-5">
+          <Link href="/staff" className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-600 text-xs font-bold text-white">
+              AI
             </span>
-            <span className="block text-xs text-text-muted">Staff Console</span>
-          </span>
-        </Link>
+            <span className="leading-tight">
+              <span className="block font-heading text-sm font-semibold text-text-primary">
+                Recruitment Pipeline
+              </span>
+              <span className="block text-xs text-text-muted">Staff Console</span>
+            </span>
+          </Link>
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(false)}
+            aria-label="Close menu"
+            className="rounded-[var(--radius-control)] p-1 text-text-muted hover:bg-surface-muted hover:text-text-primary lg:hidden"
+          >
+            <CloseIcon className="h-5 w-5" />
+          </button>
+        </div>
 
         <nav className="mt-2 flex flex-1 flex-col gap-1 px-6">
           <NavItem
@@ -132,6 +170,7 @@ export function StaffNav({
             </span>
           </div>
           <button
+            type="button"
             onClick={logout}
             className="mt-1 flex w-full items-center gap-2.5 rounded-[var(--radius-control)] px-2 py-1.5 text-xs font-medium text-text-muted transition-colors hover:bg-surface-muted hover:text-text-primary"
           >
@@ -143,9 +182,19 @@ export function StaffNav({
 
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-surface-card px-6 py-4 sm:px-8">
-          <h1 className="font-heading text-xl font-semibold text-text-primary sm:text-2xl">
-            {title}
-          </h1>
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setMobileNavOpen(true)}
+              aria-label="Open menu"
+              className="rounded-[var(--radius-control)] p-1.5 text-text-secondary hover:bg-surface-muted hover:text-text-primary lg:hidden"
+            >
+              <MenuIcon className="h-5 w-5" />
+            </button>
+            <h1 className="truncate font-heading text-xl font-semibold text-text-primary sm:text-2xl">
+              {title}
+            </h1>
+          </div>
           <div className="flex items-center gap-3">
             <ThemeToggle />
             {actions}
