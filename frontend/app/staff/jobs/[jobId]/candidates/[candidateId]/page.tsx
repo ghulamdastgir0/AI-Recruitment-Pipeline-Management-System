@@ -23,6 +23,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
+import { useConfirm } from "@/lib/confirm";
 
 interface MatchResult {
   candidateName: string | null;
@@ -89,8 +90,41 @@ interface Comment {
   id: string;
   content: string;
   authorUserId: string;
+  /** Several Hiring Managers can be assigned to the same job posting — always show whose comment this is. */
+  authorName: string;
   createdAt: string;
 }
+
+function formatCommentDate(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+// Explains, for a Hiring Manager, why neither the "Mark as Reviewed" nor
+// "Reviewed" card is showing — MANAGER_REVIEW/MANAGER_REVIEWED get their own
+// dedicated card instead (see below) and aren't in this map, so a manager
+// never lands on a candidate with a review-related section that's just
+// silently absent with no explanation.
+const MANAGER_REVIEW_GAP_MESSAGE: Record<string, string> = {
+  APPLIED: "This candidate hasn't completed their AI interview yet.",
+  SCREENING: "This candidate hasn't completed their AI interview yet.",
+  SCREENING_REJECTED: "This candidate was screened out before an interview.",
+  INTERVIEW_PENDING: "This candidate hasn't completed their AI interview yet.",
+  INTERVIEW_EXPIRED:
+    "This candidate's interview window expired before they completed it.",
+  IN_REVIEW:
+    "The AI interview is complete, but HR hasn't moved this candidate into manager review yet — check back once they do.",
+  WITHDRAWN: "This candidate withdrew their application.",
+  SELECTED: "HR selected this candidate and is preparing the offer letter.",
+  NEXT_ROUND: "HR advanced this candidate to another interview round.",
+  REJECTED: "HR has already rejected this candidate.",
+  HIRED: "This candidate has been hired.",
+};
 
 type Decision = "SELECTED" | "NEXT_ROUND" | "REJECTED";
 
@@ -105,11 +139,13 @@ function CandidateDetail() {
   const [transcriptMessage, setTranscriptMessage] = useState<string | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [commentsMessage, setCommentsMessage] = useState<string | null>(null);
+  const [showAddCommentDialog, setShowAddCommentDialog] = useState(false);
   const [newComment, setNewComment] = useState("");
   const [commentError, setCommentError] = useState<string | null>(null);
   const [submittingComment, setSubmittingComment] = useState(false);
   const [downloadingCv, setDownloadingCv] = useState(false);
   const { showToast } = useToast();
+  const confirm = useConfirm();
 
   const [decision, setDecision] = useState<Decision>("SELECTED");
   const [nextRoundTime, setNextRoundTime] = useState("");
@@ -130,6 +166,9 @@ function CandidateDetail() {
   const [reviewComment, setReviewComment] = useState("");
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [submittingReview, setSubmittingReview] = useState(false);
+
+  const [revertingReview, setRevertingReview] = useState(false);
+  const [revertError, setRevertError] = useState<string | null>(null);
 
   const [offerDetails, setOfferDetails] = useState("");
   const [offerMessage, setOfferMessage] = useState<string | null>(null);
@@ -195,6 +234,7 @@ function CandidateDetail() {
         content: newComment,
       });
       setNewComment("");
+      setShowAddCommentDialog(false);
       loadComments();
     } catch (err) {
       setCommentError(
@@ -296,6 +336,33 @@ function CandidateDetail() {
       );
     } finally {
       setSubmittingReview(false);
+    }
+  }
+
+  async function revertReview() {
+    if (revertingReview) return;
+    const confirmed = await confirm(
+      "Revert this review? The application goes back to awaiting your review, and your existing comment stays on record.",
+      { title: "Revert review", confirmLabel: "Revert" },
+    );
+    if (!confirmed) {
+      return;
+    }
+    setRevertingReview(true);
+    setRevertError(null);
+    try {
+      await postJson(
+        `/job-postings/${jobId}/candidates/${candidateId}/manager-reviewed/revert`,
+        {},
+      );
+      showToast("Review reverted — you can amend it now.");
+      loadMatch();
+    } catch (err) {
+      setRevertError(
+        err instanceof ApiError ? err.message : "Failed to revert review.",
+      );
+    } finally {
+      setRevertingReview(false);
     }
   }
 
@@ -508,46 +575,85 @@ function CandidateDetail() {
         )}
 
         <section className="mt-8">
-          <h2 className="font-heading text-base font-semibold text-text-primary">
-            Comments
-          </h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-heading text-base font-semibold text-text-primary">
+              Comments
+            </h2>
+            {canComment && (
+              <Button
+                variant="secondary"
+                onClick={() => setShowAddCommentDialog(true)}
+                className="px-2.5 py-1 text-xs"
+              >
+                Add Comment
+              </Button>
+            )}
+          </div>
           {commentsMessage && (
             <p className="mt-2 text-sm text-danger">{commentsMessage}</p>
           )}
           <ul className="mt-2 flex flex-col gap-2">
             {comments.map((comment) => (
-              <Card key={comment.id} as="li" className="p-3 text-sm text-text-secondary">
-                {comment.content}
+              <Card key={comment.id} as="li" className="p-3 text-sm">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="font-medium text-text-primary">
+                    {comment.authorName}
+                  </span>
+                  <span className="shrink-0 text-xs text-text-muted">
+                    {formatCommentDate(comment.createdAt)}
+                  </span>
+                </div>
+                <p className="mt-1 text-text-secondary">{comment.content}</p>
               </Card>
             ))}
             {comments.length === 0 && !commentsMessage && (
               <p className="text-sm text-text-muted">No comments yet.</p>
             )}
           </ul>
-          {canComment && (
-            <form onSubmit={submitComment} className="mt-3 flex flex-col gap-2">
-              <Textarea
-                value={newComment}
-                onChange={(event) => setNewComment(event.target.value)}
-                placeholder="Add a comment…"
-                rows={2}
-                maxLength={2000}
+        </section>
+
+        <Dialog
+          open={showAddCommentDialog}
+          onClose={() => {
+            if (submittingComment) return;
+            setShowAddCommentDialog(false);
+            setCommentError(null);
+          }}
+          title="Add a comment"
+        >
+          <form onSubmit={submitComment} className="flex flex-col gap-3">
+            <Textarea
+              value={newComment}
+              onChange={(event) => setNewComment(event.target.value)}
+              placeholder="Add a comment…"
+              rows={4}
+              maxLength={2000}
+              disabled={submittingComment}
+              autoFocus
+              required
+            />
+            {commentError && <p className="text-sm text-danger">{commentError}</p>}
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
                 disabled={submittingComment}
-                required
-              />
-              {commentError && (
-                <p className="text-sm text-danger">{commentError}</p>
-              )}
+                onClick={() => {
+                  setShowAddCommentDialog(false);
+                  setCommentError(null);
+                }}
+              >
+                Cancel
+              </Button>
               <Button
                 type="submit"
                 disabled={submittingComment || !newComment.trim()}
-                className="self-start"
               >
                 {submittingComment ? "Posting…" : "Post Comment"}
               </Button>
-            </form>
-          )}
-        </section>
+            </div>
+          </form>
+        </Dialog>
 
         {canComment && match?.applicationStatus === "MANAGER_REVIEW" && (
           <Card className="mt-8">
@@ -561,6 +667,46 @@ function CandidateDetail() {
             <Button onClick={() => setShowReviewDialog(true)} className="mt-3">
               Mark as Reviewed
             </Button>
+          </Card>
+        )}
+
+        {canComment && match?.applicationStatus === "MANAGER_REVIEWED" && (
+          <Card className="mt-8">
+            <div className="flex items-center gap-2">
+              <h2 className="font-heading text-base font-semibold text-text-primary">
+                Reviewed
+              </h2>
+              <span className="rounded-full bg-success-soft px-2 py-0.5 text-xs font-medium text-success-text">
+                Awaiting HR decision
+              </span>
+            </div>
+            <p className="mt-1 text-sm text-text-secondary">
+              You&apos;ve submitted your review. You can still revert it to
+              amend your comment as long as HR hasn&apos;t made a final
+              decision yet.
+            </p>
+            {revertError && (
+              <p className="mt-2 text-sm text-danger">{revertError}</p>
+            )}
+            <Button
+              variant="secondary"
+              onClick={() => void revertReview()}
+              disabled={revertingReview}
+              className="mt-3"
+            >
+              {revertingReview ? "Reverting…" : "Revert Review"}
+            </Button>
+          </Card>
+        )}
+
+        {canComment && match && MANAGER_REVIEW_GAP_MESSAGE[match.applicationStatus] && (
+          <Card className="mt-8">
+            <h2 className="font-heading text-base font-semibold text-text-primary">
+              Review
+            </h2>
+            <p className="mt-1 text-sm text-text-secondary">
+              {MANAGER_REVIEW_GAP_MESSAGE[match.applicationStatus]}
+            </p>
           </Card>
         )}
 

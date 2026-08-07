@@ -42,6 +42,7 @@ describe('CandidateCommentsService', () => {
         content: 'Great candidate',
         createdAt: new Date(),
         updatedAt: new Date(),
+        author: { firstName: 'Pat', lastName: 'Manager' },
       });
 
       const result = await service.add(
@@ -52,6 +53,7 @@ describe('CandidateCommentsService', () => {
       );
 
       expect(result.id).toBe('comment-1');
+      expect(result.authorName).toBe('Pat Manager');
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({
           actorUserId: 'hm-1',
@@ -62,15 +64,16 @@ describe('CandidateCommentsService', () => {
   });
 
   describe('list', () => {
-    it('returns comments scoped to the candidate/job-posting pair', async () => {
+    it('returns comments scoped to the candidate/job-posting pair, attributed by author name', async () => {
       const { service, prisma } = buildService();
       (prisma.candidateComment.findMany as jest.Mock).mockResolvedValue([
-        { id: 'comment-1' },
+        { id: 'comment-1', author: { firstName: 'Pat', lastName: 'Manager' } },
       ]);
 
       const result = await service.list('cand-1', 'job-1');
 
       expect(result).toHaveLength(1);
+      expect(result[0].authorName).toBe('Pat Manager');
       expect(prisma.candidateComment.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { candidateId: 'cand-1', jobPostingId: 'job-1' },

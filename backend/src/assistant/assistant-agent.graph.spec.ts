@@ -269,6 +269,6 @@ describe('AssistantAgentGraph', () => {
     const result = await graph.run(baseInput);
 
     expect(result.finalReply).toMatch(/wasn't able to finish/i);
-    expect(gemini.chat).toHaveBeenCalledTimes(5);
+    expect(gemini.chat).toHaveBeenCalledTimes(10);
   });
 });

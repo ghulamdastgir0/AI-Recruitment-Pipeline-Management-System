@@ -39,6 +39,15 @@ export interface AssistantReply {
 
 const JOB_POSTING_RESULT_TOOLS = new Set(['createJobPosting', 'updateJobPosting']);
 const PENDING_ACTION_TTL_MINUTES = 30;
+// The frontend resends the whole conversation on every message (stateless
+// history, per AssistantController's docs), and it's never trimmed on that
+// end — left unbounded, a long-running chat would resend an ever-growing
+// transcript (plus the system prompt and every tool result) on every single
+// LLM call, including every iteration inside one turn's tool loop. Only the
+// most recent turns actually matter for resolving "it"/"the same role"
+// follow-ups, so older ones are dropped here rather than trusting the
+// caller to cap it.
+const MAX_HISTORY_MESSAGES = 10;
 
 /**
  * Thin wrapper around AssistantAgentGraph (the LangGraph tool-calling loop):
@@ -68,9 +77,10 @@ export class AssistantOrchestratorService {
     attachedFile?: UploadedCv,
     onToolEvent?: (event: ToolProgressEvent) => void,
   ): Promise<AssistantReply> {
+    const recentHistory = history.slice(-MAX_HISTORY_MESSAGES);
     const messages: ChatMessage[] = [
       { role: 'system', content: buildAssistantSystemPrompt(actorRole) },
-      ...history.map((h): ChatMessage => ({
+      ...recentHistory.map((h): ChatMessage => ({
         role: h.role,
         content: h.content,
       })),

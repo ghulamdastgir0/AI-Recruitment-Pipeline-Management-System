@@ -53,7 +53,11 @@ export function Timeline({ status }: { status: string }) {
             ? "bg-brand-600"
             : isPast
               ? "bg-success"
-              : "bg-black/15";
+              // Was bg-black/15 — literal black at low opacity all but
+              // disappears against a dark theme's near-black background.
+              // text-muted is a real mid-gray in both themes, so it stays
+              // visibly (if subtly) distinct from the page either way.
+              : "bg-text-muted/40";
 
         const textClass = isSkipped
           ? "text-text-muted/60"
@@ -79,7 +83,9 @@ export function Timeline({ status }: { status: string }) {
               {index < STAGES.length - 1 && (
                 <span
                   className={`hidden h-px flex-1 sm:block ${
-                    isPast ? "bg-success" : "bg-border"
+                    // Same reasoning as the dot above — bg-border is nearly
+                    // the same shade as the dark-theme card background.
+                    isPast ? "bg-success" : "bg-text-muted/25"
                   }`}
                   aria-hidden
                 />

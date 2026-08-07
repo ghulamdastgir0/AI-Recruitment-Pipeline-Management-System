@@ -426,6 +426,25 @@ const markManagerReviewed: AssistantToolDefinition = {
   requiredRoles: MANAGER_ROLES,
 };
 
+const revertManagerReview: AssistantToolDefinition = {
+  type: 'function',
+  function: {
+    name: 'revertManagerReview',
+    description:
+      "Undo your own markManagerReviewed — pulls the application back into MANAGER_REVIEW so you can amend your feedback. Only valid while HR hasn't made a final decision yet (i.e. the application is still MANAGER_REVIEWED).",
+    parameters: {
+      type: 'object',
+      properties: {
+        candidateId: { type: 'string' },
+        jobPostingId: { type: 'string' },
+      },
+      required: ['candidateId', 'jobPostingId'],
+    },
+  },
+  isGated: never,
+  requiredRoles: MANAGER_ROLES,
+};
+
 const moveToManagerReview: AssistantToolDefinition = {
   type: 'function',
   function: {
@@ -511,6 +530,7 @@ export const ASSISTANT_TOOLS: AssistantToolDefinition[] = [
   listCandidateComments,
   addCandidateComment,
   markManagerReviewed,
+  revertManagerReview,
   moveToManagerReview,
   decideApplication,
   sendOfferLetter,
@@ -556,6 +576,7 @@ export const REVIEW_TOOLS: AssistantToolDefinition[] = [
   listCandidateComments,
   addCandidateComment,
   markManagerReviewed,
+  revertManagerReview,
   moveToManagerReview,
   decideApplication,
   sendOfferLetter,
@@ -709,6 +730,7 @@ const TOOL_PROGRESS_LABELS: Record<string, string> = {
   listCandidateComments: 'Loading candidate comments…',
   addCandidateComment: 'Posting your comment…',
   markManagerReviewed: 'Recording your review…',
+  revertManagerReview: 'Reverting your review…',
   moveToManagerReview: 'Moving candidate to manager review…',
   decideApplication: 'Recording the decision…',
   sendOfferLetter: 'Sending the offer letter…',

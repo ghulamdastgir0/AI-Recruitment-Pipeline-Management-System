@@ -99,4 +99,22 @@ export class HiringDecisionsController {
       body.comment,
     );
   }
+
+  @Post('manager-reviewed/revert')
+  @Roles('HIRING_MANAGER')
+  @ApiOperation({
+    summary:
+      "Undo markManagerReviewed — pulls the application back into MANAGER_REVIEW so the assigned Hiring Manager can amend their feedback. Only valid while still MANAGER_REVIEWED (i.e. before HR has made a final decision).",
+  })
+  async revertManagerReview(
+    @Param('jobPostingId') jobPostingId: string,
+    @Param('candidateId') candidateId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<{ applicationId: string; status: string }> {
+    return this.decisions.revertManagerReview(
+      candidateId,
+      jobPostingId,
+      user.id,
+    );
+  }
 }

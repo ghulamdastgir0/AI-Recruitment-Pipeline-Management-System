@@ -30,6 +30,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
+import { useConfirm } from "@/lib/confirm";
 
 interface JobPosting {
   id: string;
@@ -388,6 +389,7 @@ function JobDetail() {
   const [editing, setEditing] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const { showToast } = useToast();
+  const confirm = useConfirm();
 
   const canManage = user?.role === "SUPER_ADMIN" || user?.role === "HR_ADMIN";
 
@@ -457,11 +459,11 @@ function JobDetail() {
   }
 
   async function removeJob() {
-    if (
-      !window.confirm(
-        "Permanently delete this job posting and every application, interview, and match record tied to it? This cannot be undone.",
-      )
-    ) {
+    const confirmed = await confirm(
+      "Permanently delete this job posting and every application, interview, and match record tied to it? This cannot be undone.",
+      { title: "Delete job posting", confirmLabel: "Delete", destructive: true },
+    );
+    if (!confirmed) {
       return;
     }
     setLifecycleBusy(true);

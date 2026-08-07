@@ -332,4 +332,51 @@ export class HiringDecisionsService {
       comment: createdComment,
     };
   }
+
+  /**
+   * Undoes markManagerReviewed — lets the assigned Hiring Manager pull a
+   * candidate back into MANAGER_REVIEW to add/amend feedback before HR has
+   * acted on it. Only valid while still MANAGER_REVIEWED: decide() (gated on
+   * that exact status) moves the application to SELECTED/NEXT_ROUND/REJECTED
+   * the moment HR decides, so once a final decision exists this naturally
+   * refuses — there's nothing left to "not finally decided" about revert.
+   */
+  async revertManagerReview(
+    candidateId: string,
+    jobPostingId: string,
+    actorUserId: string,
+  ): Promise<{ applicationId: string; status: AppStatus }> {
+    const application = await this.prisma.application.findUnique({
+      where: {
+        candidateProfileId_jobId: {
+          candidateProfileId: candidateId,
+          jobId: jobPostingId,
+        },
+      },
+    });
+    if (!application) {
+      throw new NotFoundException(
+        `No application found for candidate "${candidateId}" and job posting "${jobPostingId}".`,
+      );
+    }
+    if (application.status !== 'MANAGER_REVIEWED') {
+      throw new ConflictException(
+        `This application is ${application.status.toLowerCase()} — it can only be reverted while awaiting HR's decision, before a final call has been made.`,
+      );
+    }
+
+    await this.prisma.application.update({
+      where: { id: application.id },
+      data: { status: 'MANAGER_REVIEW' },
+    });
+
+    await this.audit.record({
+      actorUserId,
+      action: 'application.manager_review_reverted',
+      resourceType: 'Application',
+      resourceId: application.id,
+    });
+
+    return { applicationId: application.id, status: 'MANAGER_REVIEW' };
+  }
 }

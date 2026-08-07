@@ -450,4 +450,51 @@ describe('HiringDecisionsService', () => {
       );
     });
   });
+
+  describe('revertManagerReview', () => {
+    it('throws NotFoundException when no application exists for the candidate/job pair', async () => {
+      const { service, prisma } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.revertManagerReview('cand-1', 'job-1', 'hm-1'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('throws ConflictException when the application is not MANAGER_REVIEWED (e.g. HR already decided)', async () => {
+      const { service, prisma } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        id: 'app-1',
+        status: 'SELECTED',
+      });
+
+      await expect(
+        service.revertManagerReview('cand-1', 'job-1', 'hm-1'),
+      ).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.application.update).not.toHaveBeenCalled();
+    });
+
+    it('moves a MANAGER_REVIEWED application back to MANAGER_REVIEW and audit-logs it', async () => {
+      const { service, prisma, audit } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        id: 'app-1',
+        status: 'MANAGER_REVIEWED',
+      });
+
+      const result = await service.revertManagerReview('cand-1', 'job-1', 'hm-1');
+
+      expect(prisma.application.update).toHaveBeenCalledWith({
+        where: { id: 'app-1' },
+        data: { status: 'MANAGER_REVIEW' },
+      });
+      expect(result).toEqual({ applicationId: 'app-1', status: 'MANAGER_REVIEW' });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorUserId: 'hm-1',
+          action: 'application.manager_review_reverted',
+          resourceId: 'app-1',
+        }),
+      );
+    });
+  });
 });

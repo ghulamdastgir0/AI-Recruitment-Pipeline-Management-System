@@ -50,6 +50,7 @@ function buildRegistry() {
     sendOfferLetter: jest.fn(),
     moveToManagerReview: jest.fn(),
     markManagerReviewed: jest.fn(),
+    revertManagerReview: jest.fn(),
   } as unknown as jest.Mocked<HiringDecisionsService>;
   const interviewSessions = {
     getTranscript: jest.fn(),
@@ -295,6 +296,26 @@ describe('ToolRegistryService', () => {
         'mgr-1',
         'Good fit.',
       );
+    });
+
+    it('revertManagerReview delegates to HiringDecisionsService for an assigned manager', async () => {
+      const { registry, decisions, prisma } = buildRegistry();
+      (prisma.jobPostingHiringManager.findUnique as jest.Mock).mockResolvedValue(
+        { jobId: 'job-1', hiringManagerUserId: 'mgr-1' },
+      );
+      decisions.revertManagerReview.mockResolvedValue({
+        applicationId: 'app-1',
+        status: 'MANAGER_REVIEW',
+      } as never);
+
+      const outcome = await registry.execute(
+        'revertManagerReview',
+        { candidateId: 'c-1', jobPostingId: 'job-1' },
+        managerCtx,
+      );
+
+      expect(outcome.ok).toBe(true);
+      expect(decisions.revertManagerReview).toHaveBeenCalledWith('c-1', 'job-1', 'mgr-1');
     });
 
     it('decideApplication delegates to HiringDecisionsService.decide for HR', async () => {

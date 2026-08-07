@@ -16,6 +16,7 @@ import {
   postJson,
 } from "@/lib/api";
 import { useToast } from "@/lib/toast";
+import { useConfirm } from "@/lib/confirm";
 
 type AssignableRole = "HR_ADMIN" | "HIRING_MANAGER";
 
@@ -224,6 +225,7 @@ function UsersAdmin() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const { showToast } = useToast();
+  const confirm = useConfirm();
 
   function loadUsers() {
     apiFetch<User[]>("/admin/users")
@@ -254,11 +256,11 @@ function UsersAdmin() {
   }
 
   async function removeUser(user: User) {
-    if (
-      !window.confirm(
-        `Remove ${user.firstName} ${user.lastName} (${user.email})? This deactivates their account — it does not delete their history.`,
-      )
-    ) {
+    const confirmed = await confirm(
+      `Remove ${user.firstName} ${user.lastName} (${user.email})? This deactivates their account — it does not delete their history.`,
+      { title: "Remove user", confirmLabel: "Remove", destructive: true },
+    );
+    if (!confirmed) {
       return;
     }
     setBusyId(user.id);

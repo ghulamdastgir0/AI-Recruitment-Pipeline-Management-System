@@ -3,6 +3,7 @@ import { Inter, Plus_Jakarta_Sans } from "next/font/google";
 import { AuthProvider } from "@/lib/auth";
 import { THEME_INIT_SCRIPT, ThemeProvider } from "@/lib/theme";
 import { ToastProvider } from "@/lib/toast";
+import { ConfirmProvider } from "@/lib/confirm";
 import "./globals.css";
 
 const bodyFont = Inter({
@@ -40,7 +41,9 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <ThemeProvider>
           <ToastProvider>
-            <AuthProvider>{children}</AuthProvider>
+            <ConfirmProvider>
+              <AuthProvider>{children}</AuthProvider>
+            </ConfirmProvider>
           </ToastProvider>
         </ThemeProvider>
       </body>

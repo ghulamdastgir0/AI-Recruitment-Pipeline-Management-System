@@ -7,9 +7,27 @@ export interface CandidateCommentView {
   candidateId: string;
   jobPostingId: string;
   authorUserId: string;
+  /** The commenting Hiring Manager's display name — several may be assigned to the same job posting, so a comment without this is unattributed. */
+  authorName: string;
   content: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+interface CommentWithAuthor {
+  id: string;
+  candidateId: string;
+  jobPostingId: string;
+  authorUserId: string;
+  content: string;
+  createdAt: Date;
+  updatedAt: Date;
+  author: { firstName: string; lastName: string };
+}
+
+function toView(comment: CommentWithAuthor): CandidateCommentView {
+  const { author, ...rest } = comment;
+  return { ...rest, authorName: `${author.firstName} ${author.lastName}`.trim() };
 }
 
 @Injectable()
@@ -41,6 +59,7 @@ export class CandidateCommentsService {
 
     const comment = await this.prisma.candidateComment.create({
       data: { candidateId, jobPostingId, authorUserId, content },
+      include: { author: { select: { firstName: true, lastName: true } } },
     });
 
     await this.audit.record({
@@ -51,16 +70,18 @@ export class CandidateCommentsService {
       details: { candidateId, jobPostingId },
     });
 
-    return comment;
+    return toView(comment);
   }
 
   async list(
     candidateId: string,
     jobPostingId: string,
   ): Promise<CandidateCommentView[]> {
-    return this.prisma.candidateComment.findMany({
+    const comments = await this.prisma.candidateComment.findMany({
       where: { candidateId, jobPostingId },
       orderBy: { createdAt: 'desc' },
+      include: { author: { select: { firstName: true, lastName: true } } },
     });
+    return comments.map(toView);
   }
 }

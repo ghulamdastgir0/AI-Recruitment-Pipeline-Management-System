@@ -34,7 +34,12 @@ export interface AssistantAgentResult {
   lastJobPosting?: JobPostingWithSkills;
 }
 
-const MAX_TOOL_ITERATIONS = 5;
+// 5 was too tight for legitimate read-only aggregation across several job
+// postings (e.g. "list candidates across my assigned jobs" costs 1 call to
+// list the jobs + 1 rankCandidatesForJob call per job + 1 final call to
+// write the answer — already 5 calls with just 3 jobs, with nothing left
+// over for the answer itself). 10 covers that pattern up to ~8 jobs.
+const MAX_TOOL_ITERATIONS = 10;
 const RETRY_DELAY_MS = 1500;
 
 // The LLM only ever sees a job posting as JSON in a tool result and

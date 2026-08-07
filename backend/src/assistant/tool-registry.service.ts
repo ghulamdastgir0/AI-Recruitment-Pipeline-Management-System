@@ -323,6 +323,16 @@ export class ToolRegistryService {
         );
       }
 
+      case 'revertManagerReview': {
+        const dto = await parseAndValidate(CandidateJobArgsDto, args);
+        await this.assertJobAccess(ctx, dto.jobPostingId);
+        return this.decisions.revertManagerReview(
+          dto.candidateId,
+          dto.jobPostingId,
+          ctx.actorUserId,
+        );
+      }
+
       case 'moveToManagerReview': {
         const dto = await parseAndValidate(CandidateJobArgsDto, args);
         return this.decisions.moveToManagerReview(

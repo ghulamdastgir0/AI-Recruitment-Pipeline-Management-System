@@ -17,6 +17,7 @@ import {
   postForm,
 } from "@/lib/api";
 import { useToast } from "@/lib/toast";
+import { useConfirm } from "@/lib/confirm";
 
 interface CompanyDocument {
   id: string;
@@ -158,6 +159,7 @@ function DocumentsAdmin() {
   const [busyAction, setBusyAction] = useState<"toggle" | "delete" | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const { showToast } = useToast();
+  const confirm = useConfirm();
 
   function loadDocuments() {
     apiFetch<CompanyDocument[]>("/admin/documents")
@@ -192,11 +194,11 @@ function DocumentsAdmin() {
   }
 
   async function handleDelete(doc: CompanyDocument) {
-    if (
-      !window.confirm(
-        `Delete "${doc.name}" v${doc.version}? This permanently removes the file and cannot be undone.`,
-      )
-    ) {
+    const confirmed = await confirm(
+      `Delete "${doc.name}" v${doc.version}? This permanently removes the file and cannot be undone.`,
+      { title: "Delete document", confirmLabel: "Delete", destructive: true },
+    );
+    if (!confirmed) {
       return;
     }
     setBusyId(doc.id);

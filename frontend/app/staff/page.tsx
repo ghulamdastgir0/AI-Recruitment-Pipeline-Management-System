@@ -26,6 +26,7 @@ import { StatTile } from "@/components/ui/StatTile";
 import { apiFetch, ApiError, deleteRequest, postJson } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/lib/toast";
+import { useConfirm } from "@/lib/confirm";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -217,6 +218,7 @@ function StaffDashboard() {
   );
   const [search, setSearch] = useState("");
   const { showToast } = useToast();
+  const confirm = useConfirm();
 
   function loadJobs(query: string) {
     const params = new URLSearchParams();
@@ -258,11 +260,11 @@ function StaffDashboard() {
   }
 
   async function removeJob(jobId: string, title: string) {
-    if (
-      !window.confirm(
-        `Permanently delete "${title}" and every application, interview, and match record tied to it? This cannot be undone.`,
-      )
-    ) {
+    const confirmed = await confirm(
+      `Permanently delete "${title}" and every application, interview, and match record tied to it? This cannot be undone.`,
+      { title: "Delete job posting", confirmLabel: "Delete", destructive: true },
+    );
+    if (!confirmed) {
       return;
     }
     setBusyJobId(jobId);
