@@ -1,0 +1,15 @@
+steps:
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - rms-frontend
+      - --source=frontend
+      - --region=asia-southeast1
+      - --allow-unauthenticated
+      - --memory=512Mi
+      - --min-instances=0
+      - --max-instances=2
+options:
+  logging: CLOUD_LOGGING_ONLY
