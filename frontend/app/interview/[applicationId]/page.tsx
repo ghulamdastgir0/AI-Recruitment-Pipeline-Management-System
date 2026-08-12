@@ -10,7 +10,7 @@ import { EyeTrackingBadge } from "@/components/interview/EyeTrackingBadge";
 import { MonitoringStatusBadge } from "@/components/interview/MonitoringStatusBadge";
 import { WarningToast } from "@/components/interview/WarningToast";
 import { useInterviewMonitoring } from "@/hooks/useInterviewMonitoring";
-import { API_BASE_URL, apiFileUrl } from "@/lib/api";
+import { API_BASE_URL, apiFetch, apiFileUrl } from "@/lib/api";
 import { requestCameraAndMic } from "@/lib/monitoring/cameraService";
 
 const ANSWER_TIMEOUT_MS = 20_000;
@@ -34,11 +34,16 @@ export default function InterviewPage() {
   const router = useRouter();
   const socketRef = useRef<Socket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
   const pendingAnswerRef = useRef<{ blob: Blob; questionId: string } | null>(
     null,
   );
   const answerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [statusChecked, setStatusChecked] = useState(false);
+  const [alreadySubmitted, setAlreadySubmitted] = useState(false);
+  const [alreadySubmittedToast, setAlreadySubmittedToast] = useState(false);
+  const [audioBlocked, setAudioBlocked] = useState(false);
   const [started, setStarted] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [audioOnlyStream, setAudioOnlyStream] = useState<MediaStream | null>(
@@ -137,6 +142,42 @@ export default function InterviewPage() {
     setVideoEl(video);
   }, []);
 
+  // Checked once up front, before the Join screen ever renders — without
+  // this, a candidate revisiting a finished interview's link would see the
+  // normal Join button, click it, and only find out it's already over once
+  // the WS 'join' handler rejects them. A transient failure here (network
+  // hiccup) falls through to the normal join flow rather than blocking a
+  // legitimate candidate — the WS handler still enforces this server-side
+  // as a backstop either way.
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ candidateStatus: string }>(
+      `/interview-sessions/${applicationId}/status`,
+    )
+      .then((status) => {
+        if (cancelled) return;
+        if (status.candidateStatus !== "INTERVIEW_PENDING") {
+          setAlreadySubmitted(true);
+          setAlreadySubmittedToast(true);
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setStatusChecked(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [applicationId]);
+
+  useEffect(() => {
+    if (!alreadySubmitted) return;
+    const timeout = setTimeout(() => {
+      router.replace(`/status/${applicationId}`);
+    }, 2500);
+    return () => clearTimeout(timeout);
+  }, [alreadySubmitted, applicationId, router]);
+
   // Forced early submission (5-warning cap) — stop everything and show the
   // same terminal card a natural completion shows, with a different
   // message. Deferred: effects must not call setState synchronously in
@@ -194,6 +235,68 @@ export default function InterviewPage() {
       stopMedia();
     };
   }, [started, applicationId]);
+
+  // Browsers silently block a <video>/<audio> element's autoplay once too
+  // long has passed since the last user gesture (Cloud Run's cold start +
+  // TTS round-trip is often enough to fall outside that window, even right
+  // after the candidate clicked "Join Interview"). onEnded never fires when
+  // that happens, so listening/recording/the submit button — everything
+  // downstream — silently never starts either. Driving playback explicitly
+  // here (instead of the <audio autoPlay> attribute) lets that failure be
+  // caught and surfaced as a "tap to hear it" fallback instead.
+  useEffect(() => {
+    if (!question) return;
+    setAudioBlocked(false);
+    const el = audioElRef.current;
+    el?.play().catch(() => setAudioBlocked(true));
+  }, [question]);
+
+  function playQuestionAudio() {
+    audioElRef.current
+      ?.play()
+      .then(() => setAudioBlocked(false))
+      .catch(() => setAudioBlocked(true));
+  }
+
+  if (!statusChecked) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-dark-bg p-6">
+        <p className="flex items-center gap-2 text-sm text-dark-text-muted">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-brand-500" />
+          Loading…
+        </p>
+      </main>
+    );
+  }
+
+  if (alreadySubmitted) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-dark-bg p-6">
+        {alreadySubmittedToast && (
+          <WarningToast
+            message="This interview has already been submitted."
+            onDismiss={() => setAlreadySubmittedToast(false)}
+          />
+        )}
+        <div className="flex w-full max-w-md flex-col gap-3 rounded-2xl border border-dark-border bg-dark-surface p-6 text-center">
+          <h1 className="text-lg font-semibold text-dark-text">
+            Already submitted
+          </h1>
+          <p className="text-sm text-dark-text-muted">
+            This interview has already been completed. Redirecting you to
+            your application status…
+          </p>
+          <button
+            type="button"
+            onClick={() => router.replace(`/status/${applicationId}`)}
+            className="mx-auto mt-2 rounded-full bg-brand-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-700"
+          >
+            View status
+          </button>
+        </div>
+      </main>
+    );
+  }
 
   if (!started) {
     return (
@@ -294,11 +397,23 @@ export default function InterviewPage() {
 
             <audio
               key={question.questionId}
-              autoPlay
+              ref={audioElRef}
               src={apiFileUrl(question.questionAudioUrl)}
               onEnded={() => setListening(true)}
               className="hidden"
-            />
+            >
+              <track kind="captions" />
+            </audio>
+
+            {audioBlocked && (
+              <button
+                type="button"
+                onClick={playQuestionAudio}
+                className="rounded-full bg-brand-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-700"
+              >
+                Tap to hear the question
+              </button>
+            )}
 
             <div className="w-full max-w-md">
               <AudioRecorder

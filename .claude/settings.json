@@ -60,7 +60,9 @@
       "Bash(curl -s -c /tmp/prodc.txt -X POST https://rms-backend-397963581210.asia-southeast1.run.app/auth/login -H 'Content-Type: application/json' -H 'Origin: https://rms-frontend-397963581210.asia-southeast1.run.app' -d '{\"email\":\"admin@nexorasystems.example\",\"password\":\"ChangeMe123!\"}' -w '\\\\nHTTP %{http_code}\\\\n')",
       "Bash(curl -s -D - -o /dev/null -X POST https://rms-backend-397963581210.asia-southeast1.run.app/auth/login -H 'Content-Type: application/json' -H 'Origin: https://rms-frontend-397963581210.asia-southeast1.run.app' -d '{\"email\":\"admin@nexorasystems.example\",\"password\":\"ChangeMe123!\"}')",
       "Bash(curl -s -b /tmp/prodc.txt https://rms-backend-397963581210.asia-southeast1.run.app/profile -w \"\\\\nHTTP %{http_code}\\\\n\")",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" https://rms-backend-397963581210.asia-southeast1.run.app/api-docs)"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" https://rms-backend-397963581210.asia-southeast1.run.app/api-docs)",
+      "Bash(gcloud logging *)",
+      "Bash(curl -s -o /dev/null -w \"interview page -> %{http_code}\\\\n\" \"https://rms-frontend-397963581210.asia-southeast1.run.app/interview/00000000-0000-0000-0000-000000000000\")"
     ],
     "additionalDirectories": [
       "\\tmp"
