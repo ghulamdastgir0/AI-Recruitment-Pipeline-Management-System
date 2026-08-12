@@ -16,24 +16,19 @@ export class ApiError extends Error {
 }
 
 /**
- * Thin fetch wrapper shared by every page: prefixes the API base URL,
- * attaches the stored JWT (if any — public endpoints just ignore it), and
- * throws an ApiError with the backend's parsed `{ message }` body on any
- * non-2xx response (matches NestJS's default exception filter shape).
+ * Thin fetch wrapper shared by every page: prefixes the API base URL, sends
+ * the httpOnly session cookie (public endpoints just ignore it — there's
+ * nothing to send for a logged-out visitor), and throws an ApiError with the
+ * backend's parsed `{ message }` body on any non-2xx response (matches
+ * NestJS's default exception filter shape).
  */
 export async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const headers = new Headers(options.headers);
-  if (typeof window !== "undefined") {
-    const token = window.localStorage.getItem("token");
-    if (token) headers.set("Authorization", `Bearer ${token}`);
-  }
-
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...options,
-    headers,
+    credentials: "include",
   });
 
   if (!response.ok) {
@@ -91,16 +86,10 @@ export async function postFormStream(
   path: string,
   form: FormData,
 ): Promise<Response> {
-  const headers = new Headers();
-  if (typeof window !== "undefined") {
-    const token = window.localStorage.getItem("token");
-    if (token) headers.set("Authorization", `Bearer ${token}`);
-  }
-
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: "POST",
-    headers,
     body: form,
+    credentials: "include",
   });
 
   if (!response.ok) {
@@ -134,21 +123,19 @@ export function isForbidden(err: unknown): boolean {
 }
 
 /**
- * apiFileUrl (plain URL concat) can't carry the stored JWT, so it only
- * works for genuinely public files (interview question audio). Staff
- * downloads (CVs) are behind JwtAuthGuard — fetch the bytes with the auth
- * header attached, then trigger a normal browser save via an object URL.
+ * apiFileUrl (plain URL concat) can't carry the session cookie itself via a
+ * bare <a>/<img> src in another-origin dev setups, so it only works for
+ * genuinely public files (interview question audio). Staff downloads (CVs)
+ * are behind JwtAuthGuard — fetch the bytes with the cookie attached, then
+ * trigger a normal browser save via an object URL.
  */
 export async function downloadFile(
   path: string,
   filename: string,
 ): Promise<void> {
-  const headers = new Headers();
-  if (typeof window !== "undefined") {
-    const token = window.localStorage.getItem("token");
-    if (token) headers.set("Authorization", `Bearer ${token}`);
-  }
-  const response = await fetch(`${API_BASE_URL}${path}`, { headers });
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    credentials: "include",
+  });
   if (!response.ok) {
     throw new ApiError(response.status, `Download failed (${response.status})`);
   }

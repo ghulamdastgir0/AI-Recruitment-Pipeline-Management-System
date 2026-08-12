@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm audit *)",
+      "Bash(npm ls *)",
+      "Bash(npm run *)",
+      "Bash(npm install *)",
+      "Bash(cat /tmp/server.log 2>&1 | tail -60)",
+      "Read(//tmp/**)",
+      "Bash(node dist/src/main.js)",
+      "Bash(curl -s -o /dev/null -D - http://localhost:3000/api-docs)",
+      "Bash(curl -s -o /dev/null -D - -X POST http://localhost:3000/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"a@a.com\",\"password\":\"x\"}')",
+      "Bash(node -e \"console.log\\(require\\('crypto'\\).randomBytes\\(48\\).toString\\('hex'\\)\\)\")",
+      "Bash(cd \"e:\\\\AI Recruitment Pipeline Management System\\\\backend\" && grep -rn \"JwtAuthGuard\\\\|@nestjs/jwt\" src/auth/auth.module.ts; echo \"---\"; grep -rln \"useAuth\\\\|token\" ../frontend/lib ../frontend/hooks ../frontend/components --include=*.tsx --include=*.ts | head -30)",
+      "Read(//e/frontend/**)",
+      "Bash(curl -s -o /dev/null -D - http://localhost:3000/api-docs/)",
+      "Bash(rm -f /tmp/cookies.txt)",
+      "Bash(curl -s -c /tmp/cookies.txt -D - -X POST http://localhost:3000/auth/login -H 'Content-Type: application/json' -H 'Origin: http://localhost:3001' -d '{\"email\":\"admin@nexorasystems.example\",\"password\":\"ChangeMe123!\"}')",
+      "Bash(curl -s -b /tmp/cookies.txt http://localhost:3000/profile)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/profile)",
+      "Bash(curl -s -c /tmp/cookies.txt -b /tmp/cookies.txt -D - -X POST http://localhost:3000/auth/logout -H \"Origin: http://localhost:3001\")",
+      "Bash(curl -s -b /tmp/cookies.txt -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/profile)",
+      "Bash(rm -f /tmp/cookies.txt /tmp/server.log)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
+    ]
+  }
+}

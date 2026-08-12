@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { postJson } from "./api";
+import { ApiError, apiFetch, postJson } from "./api";
 
 export type Role = "SUPER_ADMIN" | "HR_ADMIN" | "HIRING_MANAGER";
 
@@ -20,17 +20,15 @@ export interface AuthUser {
 }
 
 interface LoginResponse {
-  accessToken: string;
   user: AuthUser;
 }
 
 interface AuthContextValue {
-  token: string | null;
   user: AuthUser | null;
-  /** True until the stored session has been read from localStorage. */
+  /** True until the initial session check (GET /profile) has resolved. */
   ready: boolean;
   login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   /** Merges a patch (e.g. an edited name) into the cached session user — keeps the nav's avatar/email in sync after a profile edit without a full re-login. */
   updateUser: (patch: Partial<AuthUser>) => void;
 }
@@ -38,21 +36,19 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    // Hydrating from localStorage (a browser-only API unavailable during SSR)
-    // has to happen in an effect — there's no render-time alternative here.
+    // The session lives in an httpOnly cookie (inaccessible to page JS by
+    // design), so the only way to know if one exists on load/refresh is to
+    // ask the backend — it rides along automatically via credentials:
+    // "include" in apiFetch.
     /* eslint-disable react-hooks/set-state-in-effect */
-    const storedToken = window.localStorage.getItem("token");
-    const storedUser = window.localStorage.getItem("user");
-    if (storedToken && storedUser) {
-      setToken(storedToken);
-      setUser(JSON.parse(storedUser) as AuthUser);
-    }
-    setReady(true);
+    apiFetch<AuthUser>("/profile")
+      .then((profile) => setUser(profile))
+      .catch(() => setUser(null))
+      .finally(() => setReady(true));
     /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
@@ -61,30 +57,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email,
       password,
     });
-    window.localStorage.setItem("token", result.accessToken);
-    window.localStorage.setItem("user", JSON.stringify(result.user));
-    setToken(result.accessToken);
     setUser(result.user);
   }
 
-  function logout() {
-    window.localStorage.removeItem("token");
-    window.localStorage.removeItem("user");
-    setToken(null);
+  async function logout() {
+    try {
+      await postJson("/auth/logout", {});
+    } catch (err) {
+      // Cookie may already be gone/expired — still clear local state below.
+      if (!(err instanceof ApiError)) throw err;
+    }
     setUser(null);
   }
 
   function updateUser(patch: Partial<AuthUser>) {
-    setUser((prev) => {
-      if (!prev) return prev;
-      const next = { ...prev, ...patch };
-      window.localStorage.setItem("user", JSON.stringify(next));
-      return next;
-    });
+    setUser((prev) => (prev ? { ...prev, ...patch } : prev));
   }
 
   return (
-    <AuthContext.Provider value={{ token, user, ready, login, logout, updateUser }}>
+    <AuthContext.Provider value={{ user, ready, login, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

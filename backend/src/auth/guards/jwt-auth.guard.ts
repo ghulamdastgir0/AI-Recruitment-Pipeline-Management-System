@@ -7,7 +7,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
-import { JwtPayload } from '../types';
+import { ACCESS_TOKEN_COOKIE, JwtPayload } from '../types';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -18,10 +18,18 @@ export class JwtAuthGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request>();
+    // The httpOnly cookie is the real session for the frontend (immune to
+    // XSS token theft, unlike the old localStorage token); the Authorization
+    // header stays supported as a fallback for the Swagger "Authorize"
+    // button and any non-browser API client.
+    const cookieToken = request.cookies?.[ACCESS_TOKEN_COOKIE] as
+      | string
+      | undefined;
     const authHeader = request.header('authorization');
-    const token = authHeader?.startsWith('Bearer ')
+    const headerToken = authHeader?.startsWith('Bearer ')
       ? authHeader.slice('Bearer '.length)
       : undefined;
+    const token = cookieToken ?? headerToken;
 
     if (!token) {
       throw new UnauthorizedException('A valid bearer token is required.');
