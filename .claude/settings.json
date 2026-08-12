@@ -20,7 +20,20 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/profile)",
       "Bash(curl -s -c /tmp/cookies.txt -b /tmp/cookies.txt -D - -X POST http://localhost:3000/auth/logout -H \"Origin: http://localhost:3001\")",
       "Bash(curl -s -b /tmp/cookies.txt -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/profile)",
-      "Bash(rm -f /tmp/cookies.txt /tmp/server.log)"
+      "Bash(rm -f /tmp/cookies.txt /tmp/server.log)",
+      "Bash(grep -n 'delete\\\\|\\\\.job\\\\.delete\\\\|$transaction' src/job-postings/job-postings.service.spec.ts)",
+      "Bash(rm -f /tmp/c.txt)",
+      "Bash(curl -s -c /tmp/c.txt -X POST http://localhost:3000/auth/login -H \"Content-Type: application/json\" -H \"Origin: http://localhost:3001\" -d '{\"email\":\"admin@nexorasystems.example\",\"password\":\"ChangeMe123!\"}')",
+      "Bash(curl -s -b /tmp/c.txt -X POST http://localhost:3000/job-postings -H 'Content-Type: application/json' -d '{\"prompt\":\"Backend Engineer needing Node.js and PostgreSQL experience, 2 years minimum, hiring 1 person, salary up to 100000, deadline in 30 days\"}')",
+      "Bash(node -e \"console.log\\(new Date\\(Date.now\\(\\)+30*86400000\\).toISOString\\(\\).slice\\(0,10\\)\\)\")",
+      "Bash(curl -s -b /tmp/c.txt -X POST http://localhost:3000/job-postings -H 'Content-Type: application/json' -d '{\"title\":\"Backend Engineer\",\"rawPrompt\":\"Backend Engineer needing Node.js and PostgreSQL, 2 years min\",\"description\":\"We need a backend engineer.\",\"experienceMin\":2,\"deadline\":\"__CMDSUB_OUTPUT__\",\"hiringTarget\":1}')",
+      "Bash(node -e \"console.log\\(require\\('/tmp/job.json'\\).id\\)\")",
+      "Bash(curl -s -b /tmp/c.txt -X POST http://localhost:3000/job-postings/__CMDSUB_OUTPUT__/publish)",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s -X POST http://localhost:3000/candidates/upload -F jobPostingId=__CMDSUB_OUTPUT__ -F 'candidateName=Test Candidate' -F candidateEmail=testcand@example.com -F candidatePhone=+10000000000 -F 'file=@/tmp/resume.pdf;type=application/pdf')",
+      "Bash(curl -v -X POST http://localhost:3000/candidates/upload -F jobPostingId=__CMDSUB_OUTPUT__ -F 'candidateName=Test Candidate' -F candidateEmail=testcand@example.com -F candidatePhone=+10000000000 -F 'file=@/tmp/resume.pdf;type=application/pdf' -o /tmp/upload2.json -w '\\\\nHTTP_CODE=%{http_code}\\\\n')",
+      "Bash(curl -s -b /tmp/c.txt -X DELETE http://localhost:3000/job-postings/__CMDSUB_OUTPUT__ -w '\\\\nHTTP_CODE=%{http_code}\\\\n')",
+      "Bash(curl -s -b /tmp/c.txt http://localhost:3000/candidates/__TRACKED_VAR__/status -w '\\\\nHTTP_CODE=%{http_code}\\\\n')"
     ],
     "additionalDirectories": [
       "\\tmp"

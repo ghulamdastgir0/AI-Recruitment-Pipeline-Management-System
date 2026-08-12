@@ -1,6 +1,8 @@
 import { AuditLogService } from '../audit/audit-log.service';
+import { CvStorageService } from '../candidates/services/cv-storage.service';
 import { DocumentRetrievalService } from '../documents/services/document-retrieval.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AudioStorageService } from '../shared/audio/audio-storage.service';
 import { EmailService } from '../shared/email/email.service';
 import { EmbeddingsService } from '../shared/embeddings/embeddings.service';
 import { LlmClientService } from '../shared/llm/llm-client.service';
@@ -66,6 +68,7 @@ function buildService(
         }),
       ),
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+      delete: jest.fn().mockResolvedValue(jobRow({ status: options.jobStatus })),
     },
     skill: {
       upsert: jest.fn(({ where }: { where: { name: string } }) =>
@@ -83,8 +86,12 @@ function buildService(
       findMany: jest.fn().mockResolvedValue([]),
       update: jest.fn().mockResolvedValue({}),
     },
+    candidateProfile: {
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+    },
     emailLog: { create: jest.fn().mockResolvedValue({}) },
     $executeRaw: jest.fn().mockResolvedValue(undefined),
+    $transaction: jest.fn((ops: unknown[]) => Promise.all(ops)),
   } as unknown as jest.Mocked<PrismaService>;
 
   const embeddings = {
@@ -103,6 +110,12 @@ function buildService(
   const email = {
     send: jest.fn().mockResolvedValue(true),
   } as unknown as jest.Mocked<EmailService>;
+  const cvStorage = {
+    remove: jest.fn().mockResolvedValue(undefined),
+  } as unknown as jest.Mocked<CvStorageService>;
+  const audioStorage = {
+    remove: jest.fn().mockResolvedValue(undefined),
+  } as unknown as jest.Mocked<AudioStorageService>;
 
   return {
     service: new JobPostingsService(
@@ -112,10 +125,14 @@ function buildService(
       embeddings,
       audit,
       email,
+      cvStorage,
+      audioStorage,
     ),
     prisma,
     llm,
     email,
+    cvStorage,
+    audioStorage,
   };
 }
 
@@ -677,5 +694,78 @@ describe('JobPostingsService.update — candidateSummary stays in sync', () => {
     await service.update('job-1', { title: 'New Title' }, 'user-1');
 
     expect(llm.chat).not.toHaveBeenCalled();
+  });
+});
+
+describe('JobPostingsService.delete — storage cleanup', () => {
+  it('deletes a candidate\'s CV and profile when this job was their only application, and removes all interview audio', async () => {
+    const { service, prisma, cvStorage, audioStorage } = buildService();
+    (prisma.application.findMany as jest.Mock).mockResolvedValue([
+      {
+        candidateProfileId: 'cand-1',
+        candidateProfile: {
+          resumeFilePath: 'cvs/cand-1-resume.pdf',
+          _count: { applications: 1 },
+        },
+        interviewSession: {
+          questions: [
+            {
+              questionAudioUrl: 'interview-audio/q1.wav',
+              candidateAudioUrl: 'interview-audio/a1.wav',
+            },
+          ],
+        },
+      },
+    ]);
+
+    await service.delete('job-1', 'user-1');
+
+    expect(prisma.candidateProfile.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: ['cand-1'] } },
+    });
+    expect(prisma.job.delete).toHaveBeenCalledWith({ where: { id: 'job-1' } });
+    expect(cvStorage.remove).toHaveBeenCalledWith('cvs/cand-1-resume.pdf');
+    expect(audioStorage.remove).toHaveBeenCalledWith('interview-audio/q1.wav');
+    expect(audioStorage.remove).toHaveBeenCalledWith('interview-audio/a1.wav');
+  });
+
+  it('keeps the CV and profile of a candidate who has another application elsewhere', async () => {
+    const { service, prisma, cvStorage, audioStorage } = buildService();
+    (prisma.application.findMany as jest.Mock).mockResolvedValue([
+      {
+        candidateProfileId: 'cand-2',
+        candidateProfile: {
+          resumeFilePath: 'cvs/cand-2-resume.pdf',
+          _count: { applications: 2 },
+        },
+        interviewSession: null,
+      },
+    ]);
+
+    await service.delete('job-1', 'user-1');
+
+    expect(prisma.candidateProfile.deleteMany).toHaveBeenCalledWith({
+      where: { id: { in: [] } },
+    });
+    expect(cvStorage.remove).not.toHaveBeenCalled();
+    expect(audioStorage.remove).not.toHaveBeenCalled();
+  });
+
+  it('does not block job deletion when a storage delete fails', async () => {
+    const { service, prisma, cvStorage } = buildService();
+    (prisma.application.findMany as jest.Mock).mockResolvedValue([
+      {
+        candidateProfileId: 'cand-1',
+        candidateProfile: {
+          resumeFilePath: 'cvs/cand-1-resume.pdf',
+          _count: { applications: 1 },
+        },
+        interviewSession: null,
+      },
+    ]);
+    (cvStorage.remove as jest.Mock).mockRejectedValue(new Error('bucket unreachable'));
+
+    await expect(service.delete('job-1', 'user-1')).resolves.toBeUndefined();
+    expect(prisma.job.delete).toHaveBeenCalledWith({ where: { id: 'job-1' } });
   });
 });

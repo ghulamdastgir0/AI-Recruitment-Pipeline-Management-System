@@ -1,12 +1,15 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { AuditLogService } from '../audit/audit-log.service';
 import { resolveCandidateIdentity } from '../candidates/candidate-identity.util';
+import { CvStorageService } from '../candidates/services/cv-storage.service';
 import { DocumentRetrievalService } from '../documents/services/document-retrieval.service';
 import { AppStatus } from '../generated/prisma/enums';
+import { AudioStorageService } from '../shared/audio/audio-storage.service';
 import { EmailService } from '../shared/email/email.service';
 import { EmbeddingsService } from '../shared/embeddings/embeddings.service';
 import { LlmClientService } from '../shared/llm/llm-client.service';
@@ -79,6 +82,8 @@ export interface JobPostingWithSkills {
 
 @Injectable()
 export class JobPostingsService {
+  private readonly logger = new Logger(JobPostingsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly documentRetrieval: DocumentRetrievalService,
@@ -86,6 +91,8 @@ export class JobPostingsService {
     private readonly embeddings: EmbeddingsService,
     private readonly audit: AuditLogService,
     private readonly email: EmailService,
+    private readonly cvStorage: CvStorageService,
+    private readonly audioStorage: AudioStorageService,
   ) {}
 
   async create(
@@ -535,11 +542,58 @@ export class JobPostingsService {
    * Application against it, and (via Application's own cascade) each one's
    * AIInterviewSession/AIInterviewQuestion/CandidateSkillGrade, EmailLog, and
    * MatchResult rows, plus JobSkill/LinkedInPost/JobPostingHiringManager/
-   * CandidateComment — all handled by onDelete: Cascade at the DB level, so
-   * a single job.delete() is sufficient here.
+   * CandidateComment — all handled by onDelete: Cascade at the DB level.
+   *
+   * The DB cascade alone would leave orphaned files behind though: interview
+   * audio (question TTS + candidate answer recordings) is always
+   * application-specific, so every clip tied to this job's applications is
+   * deleted from storage. A candidate's CV is only deleted (and the now-empty
+   * CandidateProfile with it) if this was their *only* application — a
+   * candidate profile with an application to some other job still needs its
+   * resumeFilePath. This matters more than it would on local disk: on GCS's
+   * free tier, storage is a real quota, not "however much disk is free."
    */
   async delete(id: string, actorUserId: string): Promise<void> {
     const job = await this.getById(id); // throws NotFoundException if missing
+
+    const applications = await this.prisma.application.findMany({
+      where: { jobId: id },
+      select: {
+        candidateProfileId: true,
+        candidateProfile: {
+          select: {
+            resumeFilePath: true,
+            _count: { select: { applications: true } },
+          },
+        },
+        interviewSession: {
+          select: {
+            questions: {
+              select: { questionAudioUrl: true, candidateAudioUrl: true },
+            },
+          },
+        },
+      },
+    });
+
+    const audioPaths = applications.flatMap((app) =>
+      (app.interviewSession?.questions ?? []).flatMap((q) =>
+        [q.questionAudioUrl, q.candidateAudioUrl].filter(
+          (p): p is string => !!p,
+        ),
+      ),
+    );
+
+    // _count.applications is this candidate's TOTAL application count across
+    // every job, not just this one — ===1 means this application (to the job
+    // being deleted) is the only one they have, so they're about to be
+    // orphaned.
+    const orphanCandidates = applications
+      .filter((app) => app.candidateProfile?._count.applications === 1)
+      .map((app) => ({
+        id: app.candidateProfileId,
+        resumeFilePath: app.candidateProfile?.resumeFilePath ?? null,
+      }));
 
     await this.audit.record({
       actorUserId,
@@ -549,7 +603,29 @@ export class JobPostingsService {
       details: { title: job.title, status: job.status },
     });
 
-    await this.prisma.job.delete({ where: { id } });
+    await this.prisma.$transaction([
+      this.prisma.candidateProfile.deleteMany({
+        where: { id: { in: orphanCandidates.map((c) => c.id) } },
+      }),
+      this.prisma.job.delete({ where: { id } }),
+    ]);
+
+    // Storage cleanup runs after the DB commit and is best-effort — a failed
+    // delete here means a leaked file, not corrupted data, so it must never
+    // roll back (or block) the deletion HR is waiting on.
+    const results = await Promise.allSettled([
+      ...audioPaths.map((p) => this.audioStorage.remove(p)),
+      ...orphanCandidates
+        .filter((c) => c.resumeFilePath)
+        .map((c) => this.cvStorage.remove(c.resumeFilePath as string)),
+    ]);
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        this.logger.warn(
+          `Failed to remove a storage file while deleting job posting ${id}: ${String(result.reason)}`,
+        );
+      }
+    }
   }
 
   async getById(id: string): Promise<JobPostingWithSkills> {
