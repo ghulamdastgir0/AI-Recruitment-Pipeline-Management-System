@@ -29,7 +29,10 @@ export interface LogViolationResult extends ViolationSummary {
   forced: boolean;
 }
 
-export const MAX_INTERVIEW_WARNINGS = 5;
+// Must match backend/src/interviews/violation.util.ts — this copy is
+// display-only (the "Warning X/Y" toast text), the backend's copy is what
+// actually decides forced submission.
+export const MAX_INTERVIEW_WARNINGS = 8;
 
 export const VIOLATION_MESSAGES: Record<ViolationType, string> = {
   FACE_MISSING: "Your face is not visible. Please return to the camera.",

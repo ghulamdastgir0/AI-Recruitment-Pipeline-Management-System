@@ -638,11 +638,11 @@ describe('InterviewSessionService', () => {
       const { service, prisma } = buildService();
       mockActiveSession(prisma);
       (prisma.interviewViolation.groupBy as jest.Mock)
-        .mockResolvedValueOnce([{ type: 'TAB_SWITCH', _count: { _all: 4 } }]) // prior: 4 warnings
+        .mockResolvedValueOnce([{ type: 'TAB_SWITCH', _count: { _all: 7 } }]) // prior: 7 warnings
         .mockResolvedValueOnce([
-          { type: 'TAB_SWITCH', _count: { _all: 4 } },
+          { type: 'TAB_SWITCH', _count: { _all: 7 } },
           { type: 'EYES_CLOSED_TOO_LONG', _count: { _all: 1 } },
-        ]); // post-create: 5 warnings
+        ]); // post-create: 8 warnings
       const forceSubmit = jest
         .spyOn(service, 'forceSubmit')
         .mockResolvedValue({ status: 'COMPLETED', message: 'done' });
@@ -655,7 +655,7 @@ describe('InterviewSessionService', () => {
 
       expect(forceSubmit).toHaveBeenCalledWith('app-1', 'AUTO_SUBMITTED_VIOLATIONS');
       expect(result.forced).toBe(true);
-      expect(result.total).toBe(5);
+      expect(result.total).toBe(8);
     });
   });
 });

@@ -85,7 +85,15 @@
       "Bash(curl -s -o /dev/null -w 'audio endpoint -> HTTP %{http_code}, %{size_download} bytes\\\\n' https://rms-backend-397963581210.asia-southeast1.run.app/interview-sessions/questions/0c59502d-54b0-4b5b-b290-8bb3a6ff985a/audio)",
       "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\(Object.keys\\({...p.dependencies,...p.devDependencies}\\).filter\\(x=>/playwright|puppeteer|cypress/i.test\\(x\\)\\)\\)\")",
       "Bash(npx --version)",
-      "Bash(npx -y playwright --version)"
+      "Bash(npx -y playwright --version)",
+      "Bash(curl -sI \"https://rms-backend-397963581210.asia-southeast1.run.app/interview-sessions/questions/nonexistent/audio\" -H \"Origin: https://rms-frontend-397963581210.asia-southeast1.run.app\")",
+      "Bash(rm -f \"backend/storage/interview-audio/c1261949-5a2e-492b-87bf-23e50a1d9c92-question-1.wav\")",
+      "Bash(curl -sI \"http://localhost:3000/interview-sessions/questions/nonexistent/audio\")",
+      "Bash(curl -s \"http://localhost:3001/interview/e3d81244-e617-4d73-b65e-fbf0bceae4f3\")",
+      "Bash(find 'e:\\\\AI Recruitment Pipeline Management System\\\\frontend/lib/monitoring' -iname *warning*)",
+      "Bash(find 'e:\\\\AI Recruitment Pipeline Management System\\\\frontend/lib/monitoring' -iname *violation*)",
+      "Bash(find 'e:\\\\AI Recruitment Pipeline Management System\\\\frontend/lib/monitoring' -iname *browserMonitor*)",
+      "Bash(find 'e:\\\\AI Recruitment Pipeline Management System\\\\frontend/lib/monitoring' -iname *unload*)"
     ],
     "additionalDirectories": [
       "\\tmp"

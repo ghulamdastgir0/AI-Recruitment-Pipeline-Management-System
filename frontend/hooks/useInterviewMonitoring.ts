@@ -16,11 +16,19 @@ import { useEyeTracking, EyeTrackingState } from "@/hooks/useEyeTracking";
 // stretch) rather than actual attempts to cheat. Still tight enough to catch
 // a sustained absence/away-glance/second person, just with a bit more
 // tolerance before a warning fires.
-const FACE_MISSING_MS = 7_000;
-const LOOKING_AWAY_MS = 12_000;
-const LOOKING_AWAY_RADIANS = 0.4; // ~23 degrees — coarse "away from screen" threshold
-const MOBILE_CONSECUTIVE_FRAMES = 3;
+const FACE_MISSING_MS = 10_000;
+const LOOKING_AWAY_MS = 15_000;
+const LOOKING_AWAY_RADIANS = 0.45; // ~26 degrees — coarse "away from screen" threshold
+const MOBILE_CONSECUTIVE_FRAMES = 4;
 const MULTIPLE_FACES_COOLDOWN_MS = 12_000;
+// TAB_SWITCH/WINDOW_BLUR have no built-in hold-time (a raw DOM event, not a
+// continuous detector), so without a cooldown a candidate briefly checking
+// something twice in a row — or a permission dialog stealing focus and
+// giving it back — burns two+ warnings for what's really one moment of
+// "back and forth". Every other rule already debounces itself one way or
+// another; these two didn't.
+const TAB_SWITCH_COOLDOWN_MS = 15_000;
+const WINDOW_BLUR_COOLDOWN_MS = 15_000;
 // Originally bumped from 500ms to 80ms (~12Hz) to chase the "10-15 FPS"
 // spec target for eye tracking, but detectForVideo() runs synchronously on
 // the main thread — at that rate it started starving the socket/audio
@@ -124,9 +132,21 @@ export function useInterviewMonitoring(
 
   useEffect(() => {
     if (!active) return;
+    let lastTabSwitchAt = 0;
+    let lastWindowBlurAt = 0;
     return startBrowserMonitor({
-      onTabSwitch: () => void report("TAB_SWITCH"),
-      onWindowBlur: () => void report("WINDOW_BLUR"),
+      onTabSwitch: () => {
+        const now = Date.now();
+        if (now - lastTabSwitchAt < TAB_SWITCH_COOLDOWN_MS) return;
+        lastTabSwitchAt = now;
+        void report("TAB_SWITCH");
+      },
+      onWindowBlur: () => {
+        const now = Date.now();
+        if (now - lastWindowBlurAt < WINDOW_BLUR_COOLDOWN_MS) return;
+        lastWindowBlurAt = now;
+        void report("WINDOW_BLUR");
+      },
       onShortcutAttempted: (combo) => void report("SHORTCUT_ATTEMPTED", { combo }),
     });
   }, [active, report]);

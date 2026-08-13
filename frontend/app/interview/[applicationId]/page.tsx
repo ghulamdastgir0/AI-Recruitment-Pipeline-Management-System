@@ -14,6 +14,15 @@ import { API_BASE_URL, apiFetch, apiFileUrl } from "@/lib/api";
 import { requestCameraAndMic } from "@/lib/monitoring/cameraService";
 
 const ANSWER_TIMEOUT_MS = 20_000;
+// Not a flat per-question deadline — re-armed on every timeupdate tick (see
+// the question effect below), so this only ever measures a stretch of zero
+// playback progress, not a question's actual length. Purely a safety net
+// for play() neither resolving, rejecting, nor ever firing onended/onerror
+// (a hung network read, a browser quirk). Without this, that failure mode
+// leaves the candidate on a frozen screen forever: listening never flips
+// true, so AudioRecorder (silence-detection *and* the manual submit button)
+// never mounts, with no error and no way out.
+const AUDIO_STUCK_TIMEOUT_MS = 20_000;
 const FORCED_SUBMISSION_MESSAGE =
   "You have exceeded the maximum allowed warnings. Your interview has been submitted automatically.";
 
@@ -79,6 +88,10 @@ export default function InterviewPage() {
   const [listening, setListening] = useState(false);
   const [stalled, setStalled] = useState(false);
   const [joining, setJoining] = useState(false);
+  const [audioStuck, setAudioStuck] = useState(false);
+  const audioStuckTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   const monitoring = useInterviewMonitoring(applicationId, videoEl, started);
 
@@ -234,6 +247,11 @@ export default function InterviewPage() {
 
     socket.on("connect", () => {
       setConnected(true);
+      // A prior connect_error/drop may have left a stale banner up — Socket.IO
+      // auto-reconnects on its own (see interview.gateway.ts's disconnect
+      // grace period), and a successful (re)connect means whatever it said is
+      // no longer true.
+      setError(null);
       socket.emit("join", { applicationId });
     });
     socket.on("disconnect", () => setConnected(false));
@@ -267,17 +285,56 @@ export default function InterviewPage() {
     };
   }, [started, applicationId]);
 
+  function clearAudioStuckTimeout() {
+    if (audioStuckTimeoutRef.current) {
+      clearTimeout(audioStuckTimeoutRef.current);
+      audioStuckTimeoutRef.current = null;
+    }
+  }
+
+  function armAudioStuckTimeout() {
+    clearAudioStuckTimeout();
+    audioStuckTimeoutRef.current = setTimeout(() => {
+      setAudioStuck(true);
+    }, AUDIO_STUCK_TIMEOUT_MS);
+  }
+
   // Reuses the single Audio instance startInterview() already unlocked
   // during the Join click's user gesture — swapping its src and playing
   // again doesn't need a fresh gesture, so this plays automatically with no
   // button, even after the WS round-trip to fetch/generate this question.
   useEffect(() => {
     if (!question) return;
+    setAudioStuck(false);
     const audio = getAudioEl();
-    audio.onended = () => setListening(true);
+    audio.onended = () => {
+      clearAudioStuckTimeout();
+      setListening(true);
+    };
+    // A load/decode failure rejects play() on some browsers but only fires
+    // this event on others — covering both is what makes the stuck-fallback
+    // below actually reliable instead of depending on which failure mode
+    // happens to occur.
+    audio.onerror = () => setAudioStuck(true);
+    // Re-arms on every progress tick (fires ~4x/sec while actually playing),
+    // so the timeout only ever measures a stretch of *zero* progress — a
+    // genuinely long question (30s+ of speech) never trips it just for
+    // being long, only a real stall (load hang, dead connection) does.
+    audio.ontimeupdate = armAudioStuckTimeout;
     audio.src = apiFileUrl(question.questionAudioUrl);
     void audio.play().catch(() => undefined);
+    armAudioStuckTimeout();
+    return clearAudioStuckTimeout;
   }, [question]);
+
+  function retryQuestionAudio() {
+    if (!question) return;
+    setAudioStuck(false);
+    const audio = getAudioEl();
+    audio.src = apiFileUrl(question.questionAudioUrl);
+    void audio.play().catch(() => undefined);
+    armAudioStuckTimeout();
+  }
 
   if (!statusChecked) {
     return (
@@ -415,6 +472,21 @@ export default function InterviewPage() {
             <p className="max-w-xl text-center text-lg text-dark-text-secondary">
               {question.questionText}
             </p>
+
+            {audioStuck && !listening && (
+              <div className="w-full max-w-md rounded-lg border border-dark-warning-border bg-dark-warning-bg p-3 text-center">
+                <p className="text-sm text-dark-warning-text">
+                  The question audio didn&apos;t play. Check your sound, then
+                  try again.
+                </p>
+                <button
+                  onClick={retryQuestionAudio}
+                  className="mt-2 rounded bg-dark-warning-solid px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-dark-warning-solid-hover"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
 
             <div className="w-full max-w-md">
               <AudioRecorder

@@ -29,6 +29,12 @@ interface AnswerPayload {
 const JOIN_LIMIT = { max: 10, windowMs: 600_000 };
 const ANSWER_LIMIT = { max: 30, windowMs: 600_000 };
 
+// How long a dropped connection gets before it's treated as final. Cloud
+// Run has no guaranteed session affinity by default, cold starts under
+// min-instances=0, and candidates are on ordinary home/mobile networks — a
+// few seconds of WS hiccup is routine, not a candidate walking away.
+const DISCONNECT_GRACE_MS = 20_000;
+
 class SlidingWindowLimiter {
   private readonly hits = new Map<string, number[]>();
 
@@ -80,6 +86,12 @@ export class InterviewGateway implements OnGatewayDisconnect {
     ANSWER_LIMIT.max,
     ANSWER_LIMIT.windowMs,
   );
+  // One pending force-submit timer per applicationId — cleared if the
+  // candidate (or their auto-reconnecting Socket.IO client) rejoins within
+  // the grace window. In-memory only: fine at this deployment's scale
+  // (max-instances=2, and a rejoin landing on the *other* instance just
+  // means the grace period didn't apply, not that anything breaks).
+  private readonly pendingDisconnects = new Map<string, NodeJS.Timeout>();
 
   constructor(private readonly sessions: InterviewSessionService) {}
 
@@ -94,6 +106,14 @@ export class InterviewGateway implements OnGatewayDisconnect {
       });
       return;
     }
+    // Reconnecting within the grace window cancels the pending force-submit
+    // from the earlier drop — sessions.start() below resumes the same
+    // in-progress question on its own, so there's nothing else to redo here.
+    const pendingDisconnect = this.pendingDisconnects.get(body.applicationId);
+    if (pendingDisconnect) {
+      clearTimeout(pendingDisconnect);
+      this.pendingDisconnects.delete(body.applicationId);
+    }
     try {
       const turn = await this.sessions.start(body.applicationId);
       // Remembered so a later disconnect (refresh, tab close, network
@@ -107,37 +127,37 @@ export class InterviewGateway implements OnGatewayDisconnect {
   }
 
   /**
-   * Ends the interview the instant the live connection drops, for any
-   * reason — refresh, tab close, or network loss — rather than relying
-   * solely on the client-side sendBeacon (unloadHandler.ts). A refresh
-   * tears down this socket and opens a brand-new one fast enough that the
-   * beacon's separate HTTP POST can race it: the refreshed page could
-   * rejoin the still-"IN_PROGRESS" session before the beacon's
-   * BROWSER_CLOSED report is even processed. This handler runs synchronously
-   * with the disconnect itself, so there's no race — once the connection is
-   * gone, the interview is over. Deliberately no reconnect grace period: a
-   * dropped connection (of any cause) always ends the interview, which is
-   * the whole point of "refreshing must submit". forceSubmit() is a no-op
-   * if the session already finished, so this is always safe to call, and
-   * still lands alongside whatever the beacon separately reports (which
-   * additionally records the BROWSER_CLOSED violation row for the audit
-   * trail — this handler only forces completion, it doesn't log a
-   * violation itself).
+   * Ends the interview once the live connection has been gone for
+   * DISCONNECT_GRACE_MS, for any reason — refresh, tab close, or network
+   * loss — rather than relying solely on the client-side sendBeacon
+   * (unloadHandler.ts). A genuine refresh/close is well past the grace
+   * window by the time this fires, so the race this used to guard against
+   * (a refreshed page rejoining before the beacon's BROWSER_CLOSED report
+   * lands) still doesn't happen in practice. What changed: a *transient*
+   * drop — Cloud Run cold start, a WS proxy timeout, an ordinary WiFi/mobile
+   * network hiccup — no longer nukes the interview outright. Socket.IO's
+   * client auto-reconnects and re-emits 'join' on its own; handleJoin above
+   * cancels this timer if that happens in time. forceSubmit() is a no-op if
+   * the session already finished, so this stays safe to fire even after a
+   * legitimate reconnect completed the interview through some other path.
    */
-  async handleDisconnect(client: Socket): Promise<void> {
+  handleDisconnect(client: Socket): void {
     const applicationId = (client.data as { applicationId?: string })
       .applicationId;
     if (!applicationId) return;
-    try {
-      await this.sessions.forceSubmit(
-        applicationId,
-        'AUTO_SUBMITTED_BROWSER_CLOSED',
-      );
-    } catch (error) {
-      this.logger.warn(
-        `Failed to force-submit application ${applicationId} on disconnect: ${errorMessage(error)}`,
-      );
-    }
+    const existing = this.pendingDisconnects.get(applicationId);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      this.pendingDisconnects.delete(applicationId);
+      this.sessions
+        .forceSubmit(applicationId, 'AUTO_SUBMITTED_BROWSER_CLOSED')
+        .catch((error: unknown) => {
+          this.logger.warn(
+            `Failed to force-submit application ${applicationId} on disconnect: ${errorMessage(error)}`,
+          );
+        });
+    }, DISCONNECT_GRACE_MS);
+    this.pendingDisconnects.set(applicationId, timer);
   }
 
   @SubscribeMessage('answer')

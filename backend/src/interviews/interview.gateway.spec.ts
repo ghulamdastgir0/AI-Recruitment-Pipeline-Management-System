@@ -75,7 +75,14 @@ describe('InterviewGateway', () => {
   });
 
   describe('disconnect', () => {
-    it('force-submits the joined application, treating any disconnect (refresh, close, network loss) as ending the interview', async () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+    });
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('force-submits the joined application once the reconnect grace period elapses without a rejoin', async () => {
       const { gateway, sessions, client } = buildGateway();
       client.data.applicationId = 'app-1';
       sessions.forceSubmit.mockResolvedValue({
@@ -83,7 +90,10 @@ describe('InterviewGateway', () => {
         message: 'done',
       });
 
-      await gateway.handleDisconnect(client);
+      gateway.handleDisconnect(client);
+      expect(sessions.forceSubmit).not.toHaveBeenCalled();
+
+      await jest.advanceTimersByTimeAsync(20_000);
 
       expect(sessions.forceSubmit).toHaveBeenCalledWith(
         'app-1',
@@ -94,7 +104,25 @@ describe('InterviewGateway', () => {
     it('does nothing if the socket never successfully joined an interview', async () => {
       const { gateway, sessions, client } = buildGateway();
 
-      await gateway.handleDisconnect(client);
+      gateway.handleDisconnect(client);
+      await jest.advanceTimersByTimeAsync(20_000);
+
+      expect(sessions.forceSubmit).not.toHaveBeenCalled();
+    });
+
+    it('cancels the pending force-submit if the same application rejoins within the grace period', async () => {
+      const { gateway, sessions, client } = buildGateway();
+      client.data.applicationId = 'app-1';
+      sessions.start.mockResolvedValue({
+        questionId: 'q-1',
+        sequenceOrder: 1,
+        questionText: 'Q1',
+        questionAudioUrl: '/interview-sessions/questions/q-1/audio',
+      });
+
+      gateway.handleDisconnect(client);
+      await gateway.handleJoin({ applicationId: 'app-1' }, client);
+      await jest.advanceTimersByTimeAsync(20_000);
 
       expect(sessions.forceSubmit).not.toHaveBeenCalled();
     });
@@ -104,7 +132,10 @@ describe('InterviewGateway', () => {
       client.data.applicationId = 'app-1';
       sessions.forceSubmit.mockRejectedValue(new Error('db unavailable'));
 
-      await expect(gateway.handleDisconnect(client)).resolves.toBeUndefined();
+      gateway.handleDisconnect(client);
+      await expect(
+        jest.advanceTimersByTimeAsync(20_000),
+      ).resolves.toBeUndefined();
     });
   });
 

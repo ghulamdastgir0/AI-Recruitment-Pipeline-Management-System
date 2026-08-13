@@ -1,6 +1,10 @@
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
-export const MAX_INTERVIEW_WARNINGS = 5;
+// Loosened from 5 — real usage showed candidates hitting the cap from
+// ordinary behavior (a couple of tab/window blurs, a stretch of looking
+// away) well before anything resembling actual cheating. Still a real cap,
+// just one with enough headroom to absorb normal interview jitter.
+export const MAX_INTERVIEW_WARNINGS = 8;
 
 /** 0 → Low, 1-2 → Medium, 3-4 → High, 5+ → Critical. */
 export function riskLevelFor(total: number): RiskLevel {
