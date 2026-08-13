@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  NotFoundException,
   Param,
   Query,
   StreamableFile,
@@ -84,7 +85,17 @@ export class MatchingController {
       candidateId,
       jobPostingId,
     );
-    const buffer = await this.cvStorage.read(filePath);
+    let buffer: Buffer;
+    try {
+      buffer = await this.cvStorage.read(filePath);
+    } catch {
+      // A missing/unreadable object is a data problem (or a stale
+      // pre-migration path), not a server bug — fails clean instead of the
+      // generic 500 an unhandled storage error would otherwise surface as.
+      throw new NotFoundException(
+        "This candidate's CV file could not be found in storage.",
+      );
+    }
     return new StreamableFile(buffer, {
       type: 'application/pdf',
       disposition: `attachment; filename="${displayName}"`,

@@ -88,16 +88,31 @@ export class CvUploadService {
     }
 
     // A candidate must not be able to apply twice to the same job with the
-    // same email — this is independent of the CV-content-hash dedup below,
-    // which only reuses a *processed CV*, not an application decision. Two
-    // different CVs typed against the same email for the same job would
-    // otherwise each get their own CandidateProfile/Application row.
-    if (contact?.email) {
+    // same email OR the same phone number — this is independent of the
+    // CV-content-hash dedup below, which only reuses a *processed CV*, not
+    // an application decision. Two different CVs typed against the same
+    // contact info for the same job would otherwise each get their own
+    // CandidateProfile/Application row.
+    if (contact?.email || contact?.phone) {
       const alreadyApplied = await this.prisma.application.findFirst({
         where: {
           jobId: jobPostingId,
           candidateProfile: {
-            candidateEmail: { equals: contact.email, mode: 'insensitive' },
+            OR: [
+              ...(contact.email
+                ? [
+                    {
+                      candidateEmail: {
+                        equals: contact.email,
+                        mode: 'insensitive' as const,
+                      },
+                    },
+                  ]
+                : []),
+              ...(contact.phone
+                ? [{ candidatePhone: contact.phone }]
+                : []),
+            ],
           },
         },
       });
@@ -108,7 +123,7 @@ export class CvUploadService {
         // a dead-end error and no way to find what they already submitted.
         throw new ConflictException({
           message:
-            'You have already applied to this job posting with this email address.',
+            'You have already applied to this job posting with this email or phone number.',
           applicationId: alreadyApplied.id,
         });
       }

@@ -17,6 +17,7 @@ import {
 } from '../interview.constants';
 import { MAX_INTERVIEW_WARNINGS, riskLevelFor } from '../violation.util';
 import {
+  GradeResult,
   InterviewOrchestratorService,
   NextTurnResult,
   SkillEvidenceGroup,
@@ -494,7 +495,16 @@ export class InterviewSessionService {
         `No audio found for question "${questionId}".`,
       );
     }
-    return this.storage.read(question.questionAudioUrl);
+    try {
+      return await this.storage.read(question.questionAudioUrl);
+    } catch {
+      // A missing/unreadable object is a data problem (or a stale
+      // pre-migration path), not a server bug — fails clean instead of the
+      // generic 500 an unhandled storage error would otherwise surface as.
+      throw new NotFoundException(
+        `Audio for question "${questionId}" could not be found in storage.`,
+      );
+    }
   }
 
   /**
@@ -624,11 +634,26 @@ export class InterviewSessionService {
       include: { job: true },
     });
 
+    // A candidate who never answered anything (immediate disconnect, or
+    // force-submitted on the very first violation) has no transcript for the
+    // LLM to ground a grade on — asking it to grade an empty transcript
+    // anyway produced a confidently hallucinated "HIRE" in practice, rather
+    // than refusing. Skip the call and record the deterministic outcome
+    // directly instead.
     const skillGroups = groupBySkill(questions);
-    const grade = await this.orchestrator.grade({
-      jobTitle: application.job.title,
-      skillGroups,
-    });
+    const grade: GradeResult =
+      questions.length === 0
+        ? {
+            overallScore: 0,
+            skills: [],
+            recommendation: 'STRONG_NO_HIRE',
+            summary:
+              'The candidate did not answer any interview questions, so there is no evidence to evaluate.',
+          }
+        : await this.orchestrator.grade({
+            jobTitle: application.job.title,
+            skillGroups,
+          });
 
     for (const s of grade.skills) {
       const skill = await this.prisma.skill.upsert({

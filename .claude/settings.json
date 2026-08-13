@@ -62,7 +62,26 @@
       "Bash(curl -s -b /tmp/prodc.txt https://rms-backend-397963581210.asia-southeast1.run.app/profile -w \"\\\\nHTTP %{http_code}\\\\n\")",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" https://rms-backend-397963581210.asia-southeast1.run.app/api-docs)",
       "Bash(gcloud logging *)",
-      "Bash(curl -s -o /dev/null -w \"interview page -> %{http_code}\\\\n\" \"https://rms-frontend-397963581210.asia-southeast1.run.app/interview/00000000-0000-0000-0000-000000000000\")"
+      "Bash(curl -s -o /dev/null -w \"interview page -> %{http_code}\\\\n\" \"https://rms-frontend-397963581210.asia-southeast1.run.app/interview/00000000-0000-0000-0000-000000000000\")",
+      "Bash(gh auth *)",
+      "Bash(git branch *)",
+      "Bash(git push *)",
+      "Bash(git ls-remote *)",
+      "Bash(git remote *)",
+      "Bash(git fetch *)",
+      "Bash(echo \"=== objects actually in the GCS bucket ===\")",
+      "Bash(rm -f /tmp/c2.txt)",
+      "Bash(curl -s -c /tmp/c2.txt -X POST https://rms-backend-397963581210.asia-southeast1.run.app/auth/login -H \"Content-Type: application/json\" -H \"Origin: https://rms-frontend-397963581210.asia-southeast1.run.app\" -d '{\"email\":\"admin@nexorasystems.example\",\"password\":\"ChangeMe123!\"}')",
+      "Bash(curl -s -b /tmp/c2.txt -w '\\\\nHTTP %{http_code} in %{time_total}s\\\\n' -o /tmp/cvout.bin https://rms-backend-397963581210.asia-southeast1.run.app/job-postings/bd5d2572-a906-438c-a218-2bb27e4f5eeb/candidates/af2b4aca-5af2-49b2-835d-536cce5fcd81/cv)",
+      "Bash(curl -s -b /tmp/c2.txt -w '\\\\nHTTP %{http_code} in %{time_total}s\\\\n' -o /dev/null https://rms-backend-397963581210.asia-southeast1.run.app/job-postings/bd5d2572-a906-438c-a218-2bb27e4f5eeb/candidates/af2b4aca-5af2-49b2-835d-536cce5fcd81/interview)",
+      "Bash(curl -s -b /tmp/c2.txt -w '\\\\nHTTP %{http_code} in %{time_total}s\\\\n' -o /dev/null https://rms-backend-397963581210.asia-southeast1.run.app/job-postings/bd5d2572-a906-438c-a218-2bb27e4f5eeb/candidates/af2b4aca-5af2-49b2-835d-536cce5fcd81/match)",
+      "Bash(curl -s \"https://rms-backend-397963581210.asia-southeast1.run.app/interview-sessions/0f1b588d-0b13-4fba-acfe-7be4593a7354/status\" -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash(curl -s \"https://rms-backend-397963581210.asia-southeast1.run.app/interview-sessions/dbea11f8-30c7-4df5-83cf-d9f1ab7818ba/status\" -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash(curl -s \"https://rms-backend-397963581210.asia-southeast1.run.app/interview-sessions/3e943a59-59a0-4fa4-ab4d-5c0b1108f6b5/status\" -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash(node \"C:\\\\Users\\\\ADMINI~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\e--AI-Recruitment-Pipeline-Management-System\\\\09bd797b-d3a1-4e07-9966-1e3a87a4f866\\\\scratchpad\\\\fix-paths.js\")",
+      "Bash(cp \"C:\\\\Users\\\\ADMINI~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\e--AI-Recruitment-Pipeline-Management-System\\\\09bd797b-d3a1-4e07-9966-1e3a87a4f866\\\\scratchpad\\\\fix-paths.js\" \"e:\\\\AI Recruitment Pipeline Management System\\\\backend\\\\fix-paths.js\")",
+      "Bash(node fix-paths.js)",
+      "Bash(curl -s -b /tmp/c2.txt -w '\\\\nHTTP %{http_code} in %{time_total}s, size=%{size_download} bytes\\\\n' -o /tmp/cvout2.pdf https://rms-backend-397963581210.asia-southeast1.run.app/job-postings/bd5d2572-a906-438c-a218-2bb27e4f5eeb/candidates/af2b4aca-5af2-49b2-835d-536cce5fcd81/cv)"
     ],
     "additionalDirectories": [
       "\\tmp"
