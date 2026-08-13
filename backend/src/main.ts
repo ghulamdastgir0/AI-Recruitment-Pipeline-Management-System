@@ -27,6 +27,13 @@ async function bootstrap() {
       // other headers (HSTS, X-Content-Type-Options, X-Frame-Options, etc.)
       // still apply.
       contentSecurityPolicy: false,
+      // Frontend and backend are always separate origins here (different
+      // ports in dev, different Cloud Run services in prod) — Helmet's
+      // default same-origin CORP header makes the browser itself block
+      // <audio src>/<img src>/file-download requests at the network level
+      // (ERR_BLOCKED_BY_RESPONSE), independent of and invisible to the CORS
+      // config above. This is what silently broke interview question audio.
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
     }),
   );
 

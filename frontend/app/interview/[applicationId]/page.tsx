@@ -17,6 +17,12 @@ const ANSWER_TIMEOUT_MS = 20_000;
 const FORCED_SUBMISSION_MESSAGE =
   "You have exceeded the maximum allowed warnings. Your interview has been submitted automatically.";
 
+// A real (if silent) WAV, not an empty src — playing it is what actually
+// registers as media playback with the browser's autoplay-activation
+// tracking, which an empty/no-op play() call does not.
+const SILENT_WAV =
+  "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
+
 interface TurnView {
   questionId: string;
   sequenceOrder: number;
@@ -34,16 +40,29 @@ export default function InterviewPage() {
   const router = useRouter();
   const socketRef = useRef<Socket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // A plain (non-DOM) Audio object, not a rendered <audio> element — a
+  // fresh element per question (or one created after the "Join" click's
+  // gesture has already expired) never counts as a user-activated play(),
+  // so browsers silently block it. Priming *this one* instance during the
+  // Join click's synchronous call stack (see startInterview) unlocks it for
+  // every later programmatic .play() call on the same instance, gesture or
+  // not — reusing it for every question is what keeps that unlock alive.
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const pendingAnswerRef = useRef<{ blob: Blob; questionId: string } | null>(
     null,
   );
   const answerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  function getAudioEl(): HTMLAudioElement {
+    if (!audioElRef.current) {
+      audioElRef.current = new Audio();
+    }
+    return audioElRef.current;
+  }
+
   const [statusChecked, setStatusChecked] = useState(false);
   const [alreadySubmitted, setAlreadySubmitted] = useState(false);
   const [alreadySubmittedToast, setAlreadySubmittedToast] = useState(false);
-  const [audioBlocked, setAudioBlocked] = useState(false);
   const [started, setStarted] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [audioOnlyStream, setAudioOnlyStream] = useState<MediaStream | null>(
@@ -119,6 +138,18 @@ export default function InterviewPage() {
 
   async function startInterview() {
     if (joining) return;
+    // Must run synchronously, in the same call stack as the click that
+    // triggered this handler — anything after the first `await` below no
+    // longer carries the click's user-activation, so priming here (not in
+    // the question effect, which only ever runs after an async WS
+    // round-trip) is what makes every later question play automatically.
+    const audio = getAudioEl();
+    audio.src = SILENT_WAV;
+    void audio
+      .play()
+      .then(() => audio.pause())
+      .catch(() => undefined);
+
     setJoining(true);
     setCameraError(null);
     setMicrophoneError(null);
@@ -236,27 +267,17 @@ export default function InterviewPage() {
     };
   }, [started, applicationId]);
 
-  // Browsers silently block a <video>/<audio> element's autoplay once too
-  // long has passed since the last user gesture (Cloud Run's cold start +
-  // TTS round-trip is often enough to fall outside that window, even right
-  // after the candidate clicked "Join Interview"). onEnded never fires when
-  // that happens, so listening/recording/the submit button — everything
-  // downstream — silently never starts either. Driving playback explicitly
-  // here (instead of the <audio autoPlay> attribute) lets that failure be
-  // caught and surfaced as a "tap to hear it" fallback instead.
+  // Reuses the single Audio instance startInterview() already unlocked
+  // during the Join click's user gesture — swapping its src and playing
+  // again doesn't need a fresh gesture, so this plays automatically with no
+  // button, even after the WS round-trip to fetch/generate this question.
   useEffect(() => {
     if (!question) return;
-    setAudioBlocked(false);
-    const el = audioElRef.current;
-    el?.play().catch(() => setAudioBlocked(true));
+    const audio = getAudioEl();
+    audio.onended = () => setListening(true);
+    audio.src = apiFileUrl(question.questionAudioUrl);
+    void audio.play().catch(() => undefined);
   }, [question]);
-
-  function playQuestionAudio() {
-    audioElRef.current
-      ?.play()
-      .then(() => setAudioBlocked(false))
-      .catch(() => setAudioBlocked(true));
-  }
 
   if (!statusChecked) {
     return (
@@ -394,26 +415,6 @@ export default function InterviewPage() {
             <p className="max-w-xl text-center text-lg text-dark-text-secondary">
               {question.questionText}
             </p>
-
-            <audio
-              key={question.questionId}
-              ref={audioElRef}
-              src={apiFileUrl(question.questionAudioUrl)}
-              onEnded={() => setListening(true)}
-              className="hidden"
-            >
-              <track kind="captions" />
-            </audio>
-
-            {audioBlocked && (
-              <button
-                type="button"
-                onClick={playQuestionAudio}
-                className="rounded-full bg-brand-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-700"
-              >
-                Tap to hear the question
-              </button>
-            )}
 
             <div className="w-full max-w-md">
               <AudioRecorder
