@@ -9,7 +9,8 @@ import {
 } from '../dto/extracted-cv-profile.dto';
 
 /**
- * The shared default chat model (llama-3.3-70b-versatile) was found to
+ * The shared default chat model (originally llama-3.3-70b-versatile, now
+ * openai/gpt-oss-120b after Groq's Aug 2026 decommission) was found to
  * confabulate entire fictional resumes for this task instead of grounding on
  * the given CV text — wrong name/email/employers, unrelated to the actual
  * input — which also produces malformed JSON (prose prepended before the

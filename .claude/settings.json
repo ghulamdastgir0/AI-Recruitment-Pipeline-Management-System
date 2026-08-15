@@ -93,7 +93,8 @@
       "Bash(find 'e:\\\\AI Recruitment Pipeline Management System\\\\frontend/lib/monitoring' -iname *warning*)",
       "Bash(find 'e:\\\\AI Recruitment Pipeline Management System\\\\frontend/lib/monitoring' -iname *violation*)",
       "Bash(find 'e:\\\\AI Recruitment Pipeline Management System\\\\frontend/lib/monitoring' -iname *browserMonitor*)",
-      "Bash(find 'e:\\\\AI Recruitment Pipeline Management System\\\\frontend/lib/monitoring' -iname *unload*)"
+      "Bash(find 'e:\\\\AI Recruitment Pipeline Management System\\\\frontend/lib/monitoring' -iname *unload*)",
+      "Read(//e//**)"
     ],
     "additionalDirectories": [
       "\\tmp"
