@@ -497,4 +497,61 @@ describe('HiringDecisionsService', () => {
       );
     });
   });
+
+  describe('revertDecision', () => {
+    it('throws NotFoundException when no application exists for the candidate/job pair', async () => {
+      const { service, prisma } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue(null);
+
+      await expect(
+        service.revertDecision('cand-1', 'job-1', 'hr-1'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it.each(['REJECTED', 'HIRED', 'MANAGER_REVIEWED', 'IN_REVIEW'])(
+      'throws ConflictException when the application is %s',
+      async (status) => {
+        const { service, prisma } = buildService();
+        (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+          id: 'app-1',
+          status,
+        });
+
+        await expect(
+          service.revertDecision('cand-1', 'job-1', 'hr-1'),
+        ).rejects.toBeInstanceOf(ConflictException);
+        expect(prisma.application.update).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['SELECTED', 'NEXT_ROUND'])(
+      'moves a %s application back to MANAGER_REVIEWED and audit-logs it',
+      async (status) => {
+        const { service, prisma, audit } = buildService();
+        (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+          id: 'app-1',
+          status,
+        });
+
+        const result = await service.revertDecision('cand-1', 'job-1', 'hr-1');
+
+        expect(prisma.application.update).toHaveBeenCalledWith({
+          where: { id: 'app-1' },
+          data: { status: 'MANAGER_REVIEWED' },
+        });
+        expect(result).toEqual({
+          applicationId: 'app-1',
+          status: 'MANAGER_REVIEWED',
+        });
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({
+            actorUserId: 'hr-1',
+            action: 'application_decision.reverted',
+            resourceId: 'app-1',
+            details: { previousStatus: status },
+          }),
+        );
+      },
+    );
+  });
 });

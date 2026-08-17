@@ -175,6 +175,11 @@ function CandidateDetail() {
   const [offerError, setOfferError] = useState<string | null>(null);
   const [sendingOffer, setSendingOffer] = useState(false);
 
+  const [revertingDecision, setRevertingDecision] = useState(false);
+  const [revertDecisionError, setRevertDecisionError] = useState<
+    string | null
+  >(null);
+
   const [showDirectRejectDialog, setShowDirectRejectDialog] = useState(false);
   const [directRejectError, setDirectRejectError] = useState<string | null>(
     null,
@@ -363,6 +368,34 @@ function CandidateDetail() {
       );
     } finally {
       setRevertingReview(false);
+    }
+  }
+
+  async function revertDecision() {
+    if (revertingDecision) return;
+    const confirmed = await confirm(
+      "Undo this decision? The application goes back to awaiting your decision, so you can pick differently.",
+      { title: "Change decision", confirmLabel: "Change decision" },
+    );
+    if (!confirmed) {
+      return;
+    }
+    setRevertingDecision(true);
+    setRevertDecisionError(null);
+    try {
+      await postJson(
+        `/job-postings/${jobId}/candidates/${candidateId}/decision/revert`,
+        {},
+      );
+      setDecisionMessage(null);
+      showToast("Decision reverted — you can decide again.");
+      loadMatch();
+    } catch (err) {
+      setRevertDecisionError(
+        err instanceof ApiError ? err.message : "Failed to revert decision.",
+      );
+    } finally {
+      setRevertingDecision(false);
     }
   }
 
@@ -906,6 +939,30 @@ function CandidateDetail() {
           </section>
         )}
 
+        {canDecide && match && match.applicationStatus === "NEXT_ROUND" && (
+          <section className="mt-8">
+            <h2 className="font-heading text-base font-semibold text-text-primary">
+              Next Round
+            </h2>
+            <Card className="mt-2 flex flex-col gap-2">
+              <p className="text-sm text-text-secondary">
+                This candidate was advanced to another interview round.
+              </p>
+              {revertDecisionError && (
+                <p className="text-sm text-danger">{revertDecisionError}</p>
+              )}
+              <Button
+                variant="secondary"
+                onClick={() => void revertDecision()}
+                disabled={revertingDecision}
+                className="self-start"
+              >
+                {revertingDecision ? "Reverting…" : "Change Decision"}
+              </Button>
+            </Card>
+          </section>
+        )}
+
         {canDecide && match && match.applicationStatus === "SELECTED" && (
           <section className="mt-8">
             <h2 className="font-heading text-base font-semibold text-text-primary">
@@ -916,7 +973,24 @@ function CandidateDetail() {
               them as hired.
             </p>
             <Card className="mt-2">
-              <form onSubmit={sendOfferLetter} className="flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-text-muted">
+                  Selected the wrong candidate? You can still change this as
+                  long as no offer letter has been sent yet.
+                </p>
+                <Button
+                  variant="secondary"
+                  onClick={() => void revertDecision()}
+                  disabled={revertingDecision}
+                  className="shrink-0 px-2.5 py-1 text-xs"
+                >
+                  {revertingDecision ? "Reverting…" : "Change Decision"}
+                </Button>
+              </div>
+              {revertDecisionError && (
+                <p className="mt-2 text-sm text-danger">{revertDecisionError}</p>
+              )}
+              <form onSubmit={sendOfferLetter} className="mt-3 flex flex-col gap-3">
                 <Textarea
                   value={offerDetails}
                   onChange={(event) => setOfferDetails(event.target.value)}

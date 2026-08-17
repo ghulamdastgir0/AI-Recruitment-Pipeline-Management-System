@@ -151,6 +151,56 @@ export class HiringDecisionsService {
   }
 
   /**
+   * Undoes decide() — lets HR pull a SELECTED/NEXT_ROUND application back to
+   * MANAGER_REVIEWED so decide() (gated on that exact status) can be called
+   * again with a different call. Deliberately does not cover REJECTED (a
+   * rejection email has already gone out — undoing the status without
+   * un-sending that would be misleading) or HIRED (the offer letter has
+   * already gone out; that's the one truly terminal step). No email is sent
+   * for the revert itself — the candidate was never told about this
+   * decision internally being reconsidered.
+   */
+  async revertDecision(
+    candidateId: string,
+    jobPostingId: string,
+    actorUserId: string,
+  ): Promise<{ applicationId: string; status: AppStatus }> {
+    const application = await this.prisma.application.findUnique({
+      where: {
+        candidateProfileId_jobId: {
+          candidateProfileId: candidateId,
+          jobId: jobPostingId,
+        },
+      },
+    });
+    if (!application) {
+      throw new NotFoundException(
+        `No application found for candidate "${candidateId}" and job posting "${jobPostingId}".`,
+      );
+    }
+    if (application.status !== 'SELECTED' && application.status !== 'NEXT_ROUND') {
+      throw new ConflictException(
+        `This application is ${application.status.toLowerCase()} — only a SELECTED or NEXT_ROUND decision can be reverted, and only before an offer letter has been sent.`,
+      );
+    }
+
+    await this.prisma.application.update({
+      where: { id: application.id },
+      data: { status: 'MANAGER_REVIEWED' },
+    });
+
+    await this.audit.record({
+      actorUserId,
+      action: 'application_decision.reverted',
+      resourceType: 'Application',
+      resourceId: application.id,
+      details: { previousStatus: application.status },
+    });
+
+    return { applicationId: application.id, status: 'MANAGER_REVIEWED' };
+  }
+
+  /**
    * The fourth HR one-click email action — previously unbuilt entirely (no
    * EmailType, template, or action existed for an offer letter). Only valid
    * on a SELECTED application; moves it to the terminal HIRED status (the

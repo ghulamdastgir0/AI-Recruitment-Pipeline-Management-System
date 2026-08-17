@@ -44,6 +44,7 @@ interface JobPosting {
   salaryMax?: number | null;
   deadline: string;
   hiringTarget: number;
+  hiredCount: number;
   location?: string | null;
   seniority?: string | null;
   workModel?: string | null;
@@ -533,6 +534,24 @@ function JobDetail() {
                   day: "numeric",
                 })}
           </span>
+        </p>
+        <p className="mt-1 text-sm text-text-muted">
+          Hiring progress:{" "}
+          <span
+            className={
+              job.hiredCount >= job.hiringTarget
+                ? "font-medium text-success-text"
+                : "font-medium text-text-secondary"
+            }
+          >
+            {job.hiredCount} of {job.hiringTarget} hired
+          </span>
+          {job.hiredCount < job.hiringTarget && (
+            <span className="text-text-muted">
+              {" "}
+              — {job.hiringTarget - job.hiredCount} more to go
+            </span>
+          )}
         </p>
 
         {editing ? (

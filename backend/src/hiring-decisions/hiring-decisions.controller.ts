@@ -63,6 +63,19 @@ export class HiringDecisionsController {
     );
   }
 
+  @Post('decision/revert')
+  @ApiOperation({
+    summary:
+      'Undo a SELECTED or NEXT_ROUND decision, putting the application back to MANAGER_REVIEWED so a new decision can be made. Not available once an offer letter has been sent (HIRED) or a rejection email already went out (REJECTED).',
+  })
+  async revertDecision(
+    @Param('jobPostingId') jobPostingId: string,
+    @Param('candidateId') candidateId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<{ applicationId: string; status: string }> {
+    return this.decisions.revertDecision(candidateId, jobPostingId, user.id);
+  }
+
   @Post('manager-review')
   @ApiOperation({
     summary:
