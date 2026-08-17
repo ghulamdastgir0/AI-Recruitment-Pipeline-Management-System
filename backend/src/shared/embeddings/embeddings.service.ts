@@ -1,10 +1,21 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  env,
   pipeline,
   type FeatureExtractionPipeline,
 } from '@huggingface/transformers';
 
 const MODEL_ID = 'Xenova/all-MiniLM-L6-v2';
+
+// Default cache dir is inside node_modules/@huggingface/transformers/.cache —
+// fine when the process owns its own node_modules, but the backend container
+// runs as the unprivileged `node` user (see backend/Dockerfile), which only
+// has write access to /tmp there. Without this, the *first* embed() call in
+// any fresh container ever throws EACCES trying to download/cache the model
+// — which silently takes down every embedding-touching path (job create/edit,
+// CV scoring, document RAG) with a generic 500, since embed() is awaited
+// inline rather than treated as a possibly-failing external call.
+env.cacheDir = '/tmp/transformers-cache';
 
 @Injectable()
 export class EmbeddingsService {

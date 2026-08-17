@@ -94,7 +94,14 @@
       "Bash(find 'e:\\\\AI Recruitment Pipeline Management System\\\\frontend/lib/monitoring' -iname *violation*)",
       "Bash(find 'e:\\\\AI Recruitment Pipeline Management System\\\\frontend/lib/monitoring' -iname *browserMonitor*)",
       "Bash(find 'e:\\\\AI Recruitment Pipeline Management System\\\\frontend/lib/monitoring' -iname *unload*)",
-      "Read(//e//**)"
+      "Read(//e//**)",
+      "Bash(tasklist)",
+      "Bash(powershell.exe -Command \"Start-Process 'C:\\\\Program Files\\\\Docker\\\\Docker\\\\Docker Desktop.exe'\")",
+      "Bash(docker start *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" \"http://localhost:3000/job-postings/fff7cc0d-8fcd-4f43-b32d-1c3f570a70f7\")",
+      "Bash(netstat -ano)",
+      "Bash(disown)",
+      "Bash(echo \"started, pid $!\")"
     ],
     "additionalDirectories": [
       "\\tmp"
