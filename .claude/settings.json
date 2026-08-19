@@ -34,7 +34,7 @@
       "Bash(curl -v -X POST http://localhost:3000/candidates/upload -F jobPostingId=__CMDSUB_OUTPUT__ -F 'candidateName=Test Candidate' -F candidateEmail=testcand@example.com -F candidatePhone=+10000000000 -F 'file=@/tmp/resume.pdf;type=application/pdf' -o /tmp/upload2.json -w '\\\\nHTTP_CODE=%{http_code}\\\\n')",
       "Bash(curl -s -b /tmp/c.txt -X DELETE http://localhost:3000/job-postings/__CMDSUB_OUTPUT__ -w '\\\\nHTTP_CODE=%{http_code}\\\\n')",
       "Bash(curl -s -b /tmp/c.txt http://localhost:3000/candidates/__TRACKED_VAR__/status -w '\\\\nHTTP_CODE=%{http_code}\\\\n')",
-      "Bash(DATABASE_URL=\"postgresql://postgres.wxuvygqkewygoxhibguk:Gdastgir1234@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres\" npx prisma migrate deploy)",
+      "Bash(npx prisma migrate deploy)",
       "Bash(gcloud auth *)",
       "Bash(node -e ' *)",
       "Bash(gcloud --version)",
