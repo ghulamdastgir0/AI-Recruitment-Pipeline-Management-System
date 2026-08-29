@@ -281,9 +281,11 @@ interface AssignedManager {
 
 function HiringManagerPanel({
   jobId,
+  jobStatus,
   onAssignedCountChange,
 }: {
   jobId: string;
+  jobStatus: string;
   onAssignedCountChange: (count: number) => void;
 }) {
   const [options, setOptions] = useState<HiringManagerOption[] | null>(null);
@@ -338,10 +340,12 @@ function HiringManagerPanel({
       <h2 className="font-heading text-base font-semibold text-text-primary">
         Hiring Managers
       </h2>
-      <p className="mt-1 text-sm text-text-muted">
-        At least one Hiring Manager must be assigned before this job can be
-        published.
-      </p>
+      {jobStatus === "DRAFT" && (
+        <p className="mt-1 text-sm text-text-muted">
+          At least one Hiring Manager must be assigned before this job can be
+          published.
+        </p>
+      )}
       {error && <p className="mt-2 text-sm text-danger">{error}</p>}
       {options === null || assigned === null ? (
         <LoadingState />
@@ -584,6 +588,7 @@ function JobDetail() {
           <>
             <HiringManagerPanel
               jobId={jobId}
+              jobStatus={job.status}
               onAssignedCountChange={setAssignedCount}
             />
             <div className="mt-4 flex flex-wrap items-center gap-2">
