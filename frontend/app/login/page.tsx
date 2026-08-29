@@ -72,6 +72,7 @@ export default function LoginPage() {
                 placeholder="you@company.com"
                 required
                 maxLength={254}
+                autoComplete="username"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
               />
@@ -84,6 +85,7 @@ export default function LoginPage() {
                 placeholder="••••••••"
                 required
                 maxLength={72}
+                autoComplete="current-password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
               />

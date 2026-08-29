@@ -29,6 +29,12 @@ model User {
   // (JwtAuthGuard), not just at login, so revoking access doesn't wait out
   // the JWT's expiry window.
   isActive     Boolean  @default(true)
+  // Bumped to revoke every outstanding JWT for this user — on logout and on
+  // password change. Every issued token carries the value it was minted
+  // with; JwtAuthGuard rejects any token whose tokenVersion no longer
+  // matches the row. This is what makes "log out" actually end the session
+  // rather than just clearing the cookie in one browser.
+  tokenVersion Int      @default(0)
   createdAt    DateTime @default(now())
 
   candidateProfile        CandidateProfile?

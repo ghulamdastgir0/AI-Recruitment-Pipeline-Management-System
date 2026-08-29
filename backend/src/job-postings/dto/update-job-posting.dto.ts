@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsIn,
   IsISO8601,
@@ -8,8 +9,10 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  MaxLength,
   Min,
 } from 'class-validator';
+import { JOB_POSTING_LIMITS } from './create-job-posting.dto';
 
 const WORK_MODELS = ['REMOTE', 'HYBRID', 'ONSITE'] as const;
 const JOB_STATUSES = [
@@ -21,25 +24,40 @@ const JOB_STATUSES = [
 ] as const;
 
 export class UpdateJobPostingDto {
-  @ApiPropertyOptional() @IsOptional() @IsString() title?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() description?: string;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(JOB_POSTING_LIMITS.title)
+  title?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(JOB_POSTING_LIMITS.description)
+  description?: string;
 
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(JOB_POSTING_LIMITS.responsibilities.max)
   @IsString({ each: true })
+  @MaxLength(JOB_POSTING_LIMITS.responsibilities.each, { each: true })
   responsibilities?: string[];
 
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(JOB_POSTING_LIMITS.skills.max)
   @IsString({ each: true })
+  @MaxLength(JOB_POSTING_LIMITS.skills.each, { each: true })
   requiredSkills?: string[];
 
   @ApiPropertyOptional({ type: [String] })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(JOB_POSTING_LIMITS.skills.max)
   @IsString({ each: true })
+  @MaxLength(JOB_POSTING_LIMITS.skills.each, { each: true })
   preferredSkills?: string[];
 
   @ApiPropertyOptional()
@@ -65,8 +83,17 @@ export class UpdateJobPostingDto {
   @IsPositive()
   hiringTarget?: number;
 
-  @ApiPropertyOptional() @IsOptional() @IsString() location?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() seniority?: string;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(JOB_POSTING_LIMITS.location)
+  location?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(JOB_POSTING_LIMITS.seniority)
+  seniority?: string;
 
   @ApiPropertyOptional({ enum: WORK_MODELS })
   @IsOptional()

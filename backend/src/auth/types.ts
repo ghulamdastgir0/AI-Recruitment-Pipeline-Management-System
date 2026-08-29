@@ -7,6 +7,8 @@ export interface JwtPayload {
   sub: string;
   email: string;
   role: Role;
+  /** The user's tokenVersion at mint time — JwtAuthGuard rejects the token once the row's value moves past it (logout / password change). */
+  tokenVersion: number;
 }
 
 export interface AuthenticatedUser {

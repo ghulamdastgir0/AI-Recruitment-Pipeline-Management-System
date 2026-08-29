@@ -43,13 +43,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // The session lives in an httpOnly cookie (inaccessible to page JS by
     // design), so the only way to know if one exists on load/refresh is to
     // ask the backend — it rides along automatically via credentials:
-    // "include" in apiFetch.
-    /* eslint-disable react-hooks/set-state-in-effect */
-    apiFetch<AuthUser>("/profile")
-      .then((profile) => setUser(profile))
+    // "include" in apiFetch. /auth/session always returns 200 (with
+    // { user: null } when logged out) so an anonymous visitor doesn't get a
+    // 401 logged to the console on every page.
+    apiFetch<{ user: AuthUser | null }>("/auth/session")
+      .then(({ user: sessionUser }) => setUser(sessionUser))
       .catch(() => setUser(null))
       .finally(() => setReady(true));
-    /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
   async function login(email: string, password: string) {

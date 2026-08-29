@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   Patch,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -13,9 +14,12 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
+import type { Response } from 'express';
+import { AuthService } from '../auth/auth.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import type { AuthenticatedUser } from '../auth/types';
+import { setSessionCookie } from '../auth/session-cookie';
+import type { AuthenticatedUser, JwtPayload } from '../auth/types';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UserResponseDto } from './dto/user-response.dto';
@@ -33,7 +37,10 @@ import { UsersService } from './users.service';
 @UseGuards(JwtAuthGuard)
 @Controller('profile')
 export class ProfileController {
-  constructor(private readonly users: UsersService) {}
+  constructor(
+    private readonly users: UsersService,
+    private readonly auth: AuthService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: "Get the current user's own profile." })
@@ -66,8 +73,20 @@ export class ProfileController {
   async changePassword(
     @Body() body: ChangePasswordDto,
     @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<{ message: string }> {
-    await this.users.changeOwnPassword(user.id, body);
+    // changeOwnPassword bumps tokenVersion, which kills *every* JWT for this
+    // user — including the one that made this request. Re-issue a cookie for
+    // the current session so the caller stays logged in here while other
+    // sessions are revoked.
+    const updated = await this.users.changeOwnPassword(user.id, body);
+    const issued = await this.auth.issueToken({
+      id: updated.id,
+      email: updated.email,
+      role: updated.role as JwtPayload['role'],
+      tokenVersion: updated.tokenVersion,
+    });
+    setSessionCookie(res, issued.accessToken, issued.expiresAt);
     return { message: 'Password changed.' };
   }
 }

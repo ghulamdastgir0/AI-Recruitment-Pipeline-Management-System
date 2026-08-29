@@ -6,6 +6,7 @@ import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
 import { CandidateCommentsModule } from './candidate-comments/candidate-comments.module';
 import { CandidatesModule } from './candidates/candidates.module';
+import { HealthController } from './health/health.controller';
 import { HiringDecisionsModule } from './hiring-decisions/hiring-decisions.module';
 import { InterviewsModule } from './interviews/interviews.module';
 import { JobPostingsModule } from './job-postings/job-postings.module';
@@ -39,5 +40,6 @@ import { UsersModule } from './users/users.module';
     InterviewsModule,
     HiringDecisionsModule,
   ],
+  controllers: [HealthController],
 })
 export class AppModule {}

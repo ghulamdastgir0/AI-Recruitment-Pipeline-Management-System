@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsIn,
   IsISO8601,
@@ -9,15 +10,31 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  MaxLength,
   Min,
 } from 'class-validator';
 
 const WORK_MODELS = ['REMOTE', 'HYBRID', 'ONSITE'] as const;
 
+// Shared caps so CreateJobPostingDto and UpdateJobPostingDto can't drift.
+// Every one of these becomes stored text (and skill rows) — an uncapped
+// value is a data-integrity / resource-abuse risk even though the endpoint
+// is authenticated.
+export const JOB_POSTING_LIMITS = {
+  title: 200,
+  rawPrompt: 5_000,
+  description: 20_000,
+  responsibilities: { max: 20, each: 500 },
+  skills: { max: 50, each: 100 },
+  location: 200,
+  seniority: 100,
+} as const;
+
 export class CreateJobPostingDto {
   @ApiProperty({ example: 'Senior Backend Engineer' })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(JOB_POSTING_LIMITS.title)
   title!: string;
 
   @ApiProperty({
@@ -27,6 +44,7 @@ export class CreateJobPostingDto {
   })
   @IsString()
   @IsNotEmpty()
+  @MaxLength(JOB_POSTING_LIMITS.rawPrompt)
   rawPrompt!: string;
 
   @ApiPropertyOptional({
@@ -35,6 +53,7 @@ export class CreateJobPostingDto {
   })
   @IsOptional()
   @IsString()
+  @MaxLength(JOB_POSTING_LIMITS.description)
   description?: string;
 
   @ApiPropertyOptional({
@@ -44,19 +63,25 @@ export class CreateJobPostingDto {
   })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(JOB_POSTING_LIMITS.responsibilities.max)
   @IsString({ each: true })
+  @MaxLength(JOB_POSTING_LIMITS.responsibilities.each, { each: true })
   responsibilities?: string[];
 
   @ApiPropertyOptional({ type: [String], example: ['NestJS', 'PostgreSQL'] })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(JOB_POSTING_LIMITS.skills.max)
   @IsString({ each: true })
+  @MaxLength(JOB_POSTING_LIMITS.skills.each, { each: true })
   requiredSkills?: string[];
 
   @ApiPropertyOptional({ type: [String], example: ['Redis'] })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(JOB_POSTING_LIMITS.skills.max)
   @IsString({ each: true })
+  @MaxLength(JOB_POSTING_LIMITS.skills.each, { each: true })
   preferredSkills?: string[];
 
   @ApiProperty({ example: 4 })
@@ -88,11 +113,13 @@ export class CreateJobPostingDto {
   @ApiPropertyOptional({ example: 'Lahore, Pakistan' })
   @IsOptional()
   @IsString()
+  @MaxLength(JOB_POSTING_LIMITS.location)
   location?: string;
 
   @ApiPropertyOptional({ example: 'Senior' })
   @IsOptional()
   @IsString()
+  @MaxLength(JOB_POSTING_LIMITS.seniority)
   seniority?: string;
 
   @ApiPropertyOptional({ enum: WORK_MODELS })

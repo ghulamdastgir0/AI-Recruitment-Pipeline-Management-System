@@ -257,6 +257,7 @@ export class JobPostingsService {
     // status: 'PUBLISHED' directly and skip it entirely. Sharing the same
     // guard here closes that gap regardless of which write path is used.
     if (changes.status === 'PUBLISHED' && current.status !== 'PUBLISHED') {
+      this.assertPublishable(current);
       await this.assertHiringManagerAssigned(id);
     }
 
@@ -335,12 +336,43 @@ export class JobPostingsService {
     return this.getById(id);
   }
 
+  /**
+   * A posting may only *enter* PUBLISHED from DRAFT or PAUSED, while it still
+   * has headroom against its hiring target and its deadline is in the future.
+   * Without this, POST /job-postings/:id/publish (and the generic PATCH
+   * status path, and the assistant's publish tool) would happily re-open a
+   * CLOSED/ARCHIVED posting — or one that already met its quota, or whose
+   * deadline has passed — silently undoing the auto-close-at-target rule.
+   * pause()/resume()/close() already guard their own transitions; this is the
+   * gap that was left on the way *in* to PUBLISHED.
+   */
+  private assertPublishable(job: JobPostingWithSkills): void {
+    if (job.status !== 'DRAFT' && job.status !== 'PAUSED') {
+      throw new BadRequestException(
+        `A ${job.status.toLowerCase()} job posting can't be published — only a draft or paused posting can. Create a new posting instead.`,
+      );
+    }
+    if (job.hiredCount >= job.hiringTarget) {
+      throw new BadRequestException(
+        `This posting has already met its hiring target (${job.hiredCount}/${job.hiringTarget}) and can't be re-published.`,
+      );
+    }
+    if (job.deadline.getTime() <= Date.now()) {
+      throw new BadRequestException(
+        `This posting's application deadline (${job.deadline
+          .toISOString()
+          .slice(0, 10)}) has passed — update the deadline before publishing.`,
+      );
+    }
+  }
+
   async publish(
     id: string,
     actorUserId: string,
   ): Promise<JobPostingWithSkills> {
     const job = await this.getById(id);
     if (job.status !== 'PUBLISHED') {
+      this.assertPublishable(job);
       await this.assertHiringManagerAssigned(id);
 
       await this.prisma.job.update({

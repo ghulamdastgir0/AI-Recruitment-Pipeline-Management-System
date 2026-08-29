@@ -244,17 +244,27 @@ describe('UsersService', () => {
         ...HR_ADMIN_ROW,
         passwordHash: bcrypt.hashSync('correct-password', 4),
       });
-      (prisma.user.update as jest.Mock).mockResolvedValue(HR_ADMIN_ROW);
+      (prisma.user.update as jest.Mock).mockResolvedValue({
+        id: 'user-1',
+        email: 'hr@example.com',
+        role: 'HR_ADMIN',
+        tokenVersion: 1,
+      });
 
-      await service.changeOwnPassword('user-1', {
+      const result = await service.changeOwnPassword('user-1', {
         currentPassword: 'correct-password',
         newPassword: 'a-new-strong-password',
       });
 
+      // Revokes every other session (this one is re-issued by the controller).
+      expect(result.tokenVersion).toBe(1);
       expect(prisma.user.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'user-1' },
-          data: { passwordHash: expect.any(String) },
+          data: expect.objectContaining({
+            passwordHash: expect.any(String),
+            tokenVersion: { increment: 1 },
+          }),
         }),
       );
       const [updateCall] = (prisma.user.update as jest.Mock).mock.calls[0] as [

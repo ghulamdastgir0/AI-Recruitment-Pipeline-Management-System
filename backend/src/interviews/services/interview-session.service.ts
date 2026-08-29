@@ -90,8 +90,6 @@ export interface InterviewStatusView {
   result?: InterviewResultView;
   /** CV processing failed permanently — nothing will change without a fresh upload; lets pollers stop. */
   terminal?: boolean;
-  /** Only present once an AIInterviewSession exists — lets the frontend rehydrate its warning count after a refresh. */
-  violations?: ViolationSummary;
 }
 
 export interface TranscriptQuestionView {
@@ -121,8 +119,18 @@ export interface InterviewTranscriptView {
   violations: ViolationSummary;
 }
 
+// Candidate-facing copy — never surface a raw ISO string here. The frontend
+// also gets `interviewDeadline` as a separate field and re-formats it in the
+// viewer's own timezone; this text is the no-JS / plain fallback.
+const formatDeadline = (deadline: Date): string =>
+  deadline.toLocaleString('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'UTC',
+  }) + ' UTC';
+
 const invitePlainMessage = (deadline: Date): string =>
-  `Congratulations — your application passed our initial screening. Please complete a short AI-conducted technical interview before ${deadline.toISOString()}.`;
+  `Congratulations — your application passed our initial screening. Please complete a short AI-conducted technical interview before ${formatDeadline(deadline)}.`;
 
 const rejectionPlainMessage =
   "Thank you for applying. After careful review, we've decided not to move forward with your application at this time.";
@@ -383,14 +391,17 @@ export class InterviewSessionService {
     }
 
     const session = application.interviewSession;
-    const violations = await this.getViolationSummaryBySessionId(session.id);
+    // Note: the proctoring violation breakdown / risk level is deliberately
+    // NOT returned here. This endpoint is unauthenticated (keyed only by the
+    // applicationId), so it must not disclose internal proctoring assessment
+    // data. The live interview client rehydrates its own warning count from
+    // GET /interview-sessions/:id/violations instead.
     if (await this.expireIfNeeded(session, applicationId)) {
       return {
         applicationStatus: 'INTERVIEW_EXPIRED',
         candidateStatus: toCandidateStatus('INTERVIEW_EXPIRED'),
         message:
           'The window to complete your technical interview has expired. Please contact us if you believe this is a mistake.',
-        violations,
       };
     }
 
@@ -401,7 +412,6 @@ export class InterviewSessionService {
           candidateStatus: toCandidateStatus(application.status),
           message: invitePlainMessage(session.windowExpiresAt),
           interviewDeadline: session.windowExpiresAt,
-          violations,
         };
       case 'IN_PROGRESS': {
         const pending = session.questions.find((q) => !q.answeredAt);
@@ -410,7 +420,6 @@ export class InterviewSessionService {
           candidateStatus: toCandidateStatus(application.status),
           message: 'Your technical interview is in progress.',
           currentQuestion: pending ? this.toTurnView(pending) : undefined,
-          violations,
         };
       }
       case 'COMPLETED':
@@ -419,14 +428,12 @@ export class InterviewSessionService {
           candidateStatus: toCandidateStatus(application.status),
           message: postInterviewMessage(application.status),
           result: { status: 'COMPLETED', message: interviewSubmittedMessage },
-          violations,
         };
       default:
         return {
           applicationStatus: application.status,
           candidateStatus: toCandidateStatus(application.status),
           message: 'This interview is no longer active.',
-          violations,
         };
     }
   }
@@ -542,7 +549,7 @@ export class InterviewSessionService {
       data: {
         sessionId: session.id,
         type,
-        metadataJson: { ...metadata, warningNumber } as object,
+        metadataJson: { ...metadata, warningNumber },
       },
     });
 
@@ -627,7 +634,8 @@ export class InterviewSessionService {
       targetSkill: { name: string } | null;
     }[],
     terminationReason?:
-      'AUTO_SUBMITTED_VIOLATIONS' | 'AUTO_SUBMITTED_BROWSER_CLOSED',
+      | 'AUTO_SUBMITTED_VIOLATIONS'
+      | 'AUTO_SUBMITTED_BROWSER_CLOSED',
   ): Promise<InterviewResultView> {
     const application = await this.prisma.application.findUniqueOrThrow({
       where: { id: applicationId },

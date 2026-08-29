@@ -231,8 +231,22 @@ export class UsersService {
     return toView(user);
   }
 
-  /** Self-service password change — requires the current password, same as any other credential rotation. */
-  async changeOwnPassword(id: string, dto: ChangePasswordDto): Promise<void> {
+  /**
+   * Self-service password change — requires the current password, same as
+   * any other credential rotation. Bumps tokenVersion in the same write so
+   * every JWT issued before the change (this session included) is dead; the
+   * caller re-issues a fresh cookie for the current session (see
+   * ProfileController.changePassword).
+   */
+  async changeOwnPassword(
+    id: string,
+    dto: ChangePasswordDto,
+  ): Promise<{
+    id: string;
+    email: string;
+    role: string;
+    tokenVersion: number;
+  }> {
     const user = await this.getUserOrThrow(id);
     const matches = await bcrypt.compare(
       dto.currentPassword,
@@ -243,7 +257,11 @@ export class UsersService {
     }
 
     const passwordHash = await bcrypt.hash(dto.newPassword, SALT_ROUNDS);
-    await this.prisma.user.update({ where: { id }, data: { passwordHash } });
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data: { passwordHash, tokenVersion: { increment: 1 } },
+      select: { id: true, email: true, role: true, tokenVersion: true },
+    });
 
     await this.audit.record({
       actorUserId: id,
@@ -251,6 +269,8 @@ export class UsersService {
       resourceType: 'User',
       resourceId: id,
     });
+
+    return updated;
   }
 
   private async getUserOrThrow(id: string) {

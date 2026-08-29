@@ -587,7 +587,10 @@ function JobDetail() {
               onAssignedCountChange={setAssignedCount}
             />
             <div className="mt-4 flex flex-wrap items-center gap-2">
-              {job.status !== "PUBLISHED" && job.status !== "PAUSED" && (
+              {/* Only a DRAFT can be published from here. PAUSED has its own
+                  Resume button below; CLOSED/ARCHIVED are terminal and the
+                  backend rejects re-publishing them. */}
+              {job.status === "DRAFT" && (
                 <Button
                   onClick={publish}
                   disabled={publishing || assignedCount === 0}
@@ -623,7 +626,7 @@ function JobDetail() {
                 Delete
               </Button>
             </div>
-            {job.status !== "PUBLISHED" && job.status !== "PAUSED" && assignedCount === 0 && (
+            {job.status === "DRAFT" && assignedCount === 0 && (
               <p className="mt-2 text-sm text-warning-text">
                 Assign at least one Hiring Manager before publishing this job
                 posting.

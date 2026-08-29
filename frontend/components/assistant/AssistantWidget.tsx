@@ -286,7 +286,7 @@ export function AssistantWidget() {
         onClick={() => setOpen((prev) => !prev)}
         aria-label={open ? "Close assistant" : "Open recruitment assistant"}
         aria-expanded={open}
-        className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg transition-transform hover:bg-brand-700 hover:scale-105"
+        className="fixed bottom-6 right-6 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-brand-600 text-white shadow-lg transition-transform hover:bg-brand-700 hover:scale-105"
       >
         <BotIcon className="h-7 w-7" />
       </button>
@@ -296,7 +296,7 @@ export function AssistantWidget() {
           ref={panelRef}
           role="dialog"
           aria-label="Recruitment assistant"
-          className="fixed bottom-24 right-6 z-40 flex h-[70vh] max-h-[560px] w-[380px] max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface-card shadow-lg"
+          className="fixed bottom-24 right-6 z-30 flex h-[70vh] max-h-[560px] w-[380px] max-w-[calc(100vw-3rem)] flex-col overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface-card shadow-lg"
         >
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <div>

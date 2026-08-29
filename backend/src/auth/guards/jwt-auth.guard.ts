@@ -46,6 +46,12 @@ export class JwtAuthGuard implements CanActivate {
       if (!user || !user.isActive) {
         throw new UnauthorizedException('Invalid or expired token.');
       }
+      // Session revocation: logout and password change bump the row's
+      // tokenVersion. A token minted before that no longer matches and is
+      // dead server-side, even though it hasn't expired.
+      if (payload.tokenVersion !== user.tokenVersion) {
+        throw new UnauthorizedException('Invalid or expired token.');
+      }
       request.user = {
         id: user.id,
         email: user.email,

@@ -169,14 +169,27 @@ export default function InterviewPage() {
     try {
       const media = await requestCameraAndMic();
       if (!media.stream) {
-        setCameraError(media.cameraError ?? null);
-        setMicrophoneError(media.microphoneError ?? null);
+        // requestCameraAndMic always resolves and always reports at least one
+        // reason it couldn't get a stream — but never leave the candidate on
+        // a silent, re-enabled button with no explanation if that ever fails.
+        if (!media.cameraError && !media.microphoneError) {
+          setCameraError(
+            "We couldn't access your camera and microphone. Please check your browser permissions and try again.",
+          );
+        } else {
+          setCameraError(media.cameraError ?? null);
+          setMicrophoneError(media.microphoneError ?? null);
+        }
         return;
       }
       streamRef.current = media.stream;
       setStream(media.stream);
       setAudioOnlyStream(new MediaStream(media.stream.getAudioTracks()));
       setStarted(true);
+    } catch {
+      setCameraError(
+        "Something went wrong starting the interview. Please refresh the page and try again.",
+      );
     } finally {
       setJoining(false);
     }

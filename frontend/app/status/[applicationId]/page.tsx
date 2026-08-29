@@ -35,6 +35,16 @@ function isTerminal(status: StatusView): boolean {
   );
 }
 
+/** Render a backend ISO date in the viewer's own locale/timezone. */
+function formatDeadline(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return date.toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+}
+
 interface TurnView {
   questionId: string;
   sequenceOrder: number;
@@ -121,6 +131,11 @@ export default function StatusPage() {
         </div>
 
         <p className="mt-6 text-sm text-text-secondary">{status.message}</p>
+        {status.interviewDeadline && (
+          <p className="mt-2 text-sm font-medium text-text-primary">
+            Interview deadline: {formatDeadline(status.interviewDeadline)}
+          </p>
+        )}
         {status.applicationStatus === "APPLIED" && (
           <p className="mt-2 text-xs text-text-muted">
             This page updates automatically — no need to refresh.

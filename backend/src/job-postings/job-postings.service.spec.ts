@@ -14,6 +14,7 @@ function jobRow(
     status: string;
     hiredCount: number;
     hiringTarget: number;
+    deadline: Date;
   }> = {},
 ) {
   return {
@@ -29,7 +30,9 @@ function jobRow(
     location: null,
     seniority: null,
     workModel: null,
-    deadline: new Date(),
+    // Default to a comfortably future deadline so publish()/update()'s
+    // deadline guard doesn't trip in tests that aren't about it.
+    deadline: overrides.deadline ?? new Date(Date.now() + 30 * 86_400_000),
     portalPublishedAt: null,
     createdByUserId: 'user-1',
     createdAt: new Date(),
@@ -42,16 +45,19 @@ function buildService(
     jobStatus?: string;
     hiredCount?: number;
     hiringTarget?: number;
+    deadline?: Date;
   } = {},
 ) {
+  const currentRow = jobRow({
+    status: options.jobStatus,
+    hiredCount: options.hiredCount,
+    hiringTarget: options.hiringTarget,
+    deadline: options.deadline,
+  });
   const prisma = {
     job: {
-      findUnique: jest
-        .fn()
-        .mockResolvedValue(jobRow({ status: options.jobStatus })),
-      findUniqueOrThrow: jest
-        .fn()
-        .mockResolvedValue(jobRow({ status: options.jobStatus })),
+      findUnique: jest.fn().mockResolvedValue(currentRow),
+      findUniqueOrThrow: jest.fn().mockResolvedValue(currentRow),
       create: jest
         .fn()
         .mockResolvedValue(jobRow({ status: options.jobStatus })),
@@ -68,7 +74,9 @@ function buildService(
         }),
       ),
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
-      delete: jest.fn().mockResolvedValue(jobRow({ status: options.jobStatus })),
+      delete: jest
+        .fn()
+        .mockResolvedValue(jobRow({ status: options.jobStatus })),
     },
     skill: {
       upsert: jest.fn(({ where }: { where: { name: string } }) =>
@@ -278,6 +286,78 @@ describe('JobPostingsService.publish — mandatory Hiring Manager gate', () => {
     await service.publish('job-1', 'user-1');
 
     expect(prisma.jobPostingHiringManager.count).not.toHaveBeenCalled();
+    expect(prisma.job.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('JobPostingsService.publish — cannot re-open a closed/filled/expired posting', () => {
+  it('refuses to publish a CLOSED posting', async () => {
+    const { service, prisma } = buildService({ jobStatus: 'CLOSED' });
+    (prisma.jobPostingHiringManager.count as jest.Mock).mockResolvedValue(1);
+
+    await expect(service.publish('job-1', 'user-1')).rejects.toThrow(
+      /closed job posting can't be published/i,
+    );
+    expect(prisma.job.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses to publish an ARCHIVED posting', async () => {
+    const { service, prisma } = buildService({ jobStatus: 'ARCHIVED' });
+    (prisma.jobPostingHiringManager.count as jest.Mock).mockResolvedValue(1);
+
+    await expect(service.publish('job-1', 'user-1')).rejects.toThrow(
+      /archived job posting can't be published/i,
+    );
+    expect(prisma.job.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses to publish a DRAFT that already met its hiring target', async () => {
+    const { service, prisma } = buildService({
+      jobStatus: 'DRAFT',
+      hiredCount: 2,
+      hiringTarget: 2,
+    });
+    (prisma.jobPostingHiringManager.count as jest.Mock).mockResolvedValue(1);
+
+    await expect(service.publish('job-1', 'user-1')).rejects.toThrow(
+      /already met its hiring target/i,
+    );
+    expect(prisma.job.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses to publish a posting whose deadline has already passed', async () => {
+    const { service, prisma } = buildService({
+      jobStatus: 'DRAFT',
+      deadline: new Date(Date.now() - 86_400_000),
+    });
+    (prisma.jobPostingHiringManager.count as jest.Mock).mockResolvedValue(1);
+
+    await expect(service.publish('job-1', 'user-1')).rejects.toThrow(
+      /deadline .* has passed/i,
+    );
+    expect(prisma.job.update).not.toHaveBeenCalled();
+  });
+
+  it('still allows publishing a PAUSED posting that is within target and deadline', async () => {
+    const { service, prisma } = buildService({ jobStatus: 'PAUSED' });
+    (prisma.jobPostingHiringManager.count as jest.Mock).mockResolvedValue(1);
+
+    await service.publish('job-1', 'user-1');
+
+    expect(prisma.job.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'PUBLISHED' }),
+      }),
+    );
+  });
+
+  it('blocks the generic PATCH status path from re-opening a CLOSED posting', async () => {
+    const { service, prisma } = buildService({ jobStatus: 'CLOSED' });
+    (prisma.jobPostingHiringManager.count as jest.Mock).mockResolvedValue(1);
+
+    await expect(
+      service.update('job-1', { status: 'PUBLISHED' }, 'user-1'),
+    ).rejects.toThrow(/closed job posting can't be published/i);
     expect(prisma.job.update).not.toHaveBeenCalled();
   });
 });
@@ -616,7 +696,8 @@ describe('JobPostingsService.create — duplicate-draft guard', () => {
     await service.create(
       {
         title: 'Frontend Web Developer',
-        rawPrompt: 'Create a frontend web dev job, junior, onsite, Lahore Pakistan',
+        rawPrompt:
+          'Create a frontend web dev job, junior, onsite, Lahore Pakistan',
         experienceMin: 1,
         hiringTarget: 1,
         deadline: new Date().toISOString(),
@@ -698,7 +779,7 @@ describe('JobPostingsService.update — candidateSummary stays in sync', () => {
 });
 
 describe('JobPostingsService.delete — storage cleanup', () => {
-  it('deletes a candidate\'s CV and profile when this job was their only application, and removes all interview audio', async () => {
+  it("deletes a candidate's CV and profile when this job was their only application, and removes all interview audio", async () => {
     const { service, prisma, cvStorage, audioStorage } = buildService();
     (prisma.application.findMany as jest.Mock).mockResolvedValue([
       {
@@ -763,7 +844,9 @@ describe('JobPostingsService.delete — storage cleanup', () => {
         interviewSession: null,
       },
     ]);
-    (cvStorage.remove as jest.Mock).mockRejectedValue(new Error('bucket unreachable'));
+    (cvStorage.remove as jest.Mock).mockRejectedValue(
+      new Error('bucket unreachable'),
+    );
 
     await expect(service.delete('job-1', 'user-1')).resolves.toBeUndefined();
     expect(prisma.job.delete).toHaveBeenCalledWith({ where: { id: 'job-1' } });

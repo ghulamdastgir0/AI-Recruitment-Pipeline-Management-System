@@ -551,6 +551,26 @@ describe('InterviewSessionService', () => {
       expect(status.message).toMatch(/still being reviewed/i);
     });
 
+    it('never exposes the proctoring violation breakdown / risk level on this unauthenticated endpoint', async () => {
+      const { service, prisma } = buildService();
+      (prisma.application.findUnique as jest.Mock).mockResolvedValue({
+        id: 'app-1',
+        status: 'IN_REVIEW',
+        candidateProfile: { cvStatus: 'READY' },
+        interviewSession: {
+          id: 'session-1',
+          status: 'COMPLETED',
+          windowExpiresAt: inTheFuture,
+          questions: [],
+        },
+      });
+
+      const status = await service.getStatus('app-1');
+
+      expect(status).not.toHaveProperty('violations');
+      expect(JSON.stringify(status)).not.toMatch(/riskLevel|CRITICAL/);
+    });
+
     function withCompletedSession(applicationStatus: string) {
       const { service, prisma } = buildService();
       (prisma.application.findUnique as jest.Mock).mockResolvedValue({
@@ -602,7 +622,9 @@ describe('InterviewSessionService', () => {
   });
 
   describe('logViolation', () => {
-    function mockActiveSession(prisma: ReturnType<typeof buildService>['prisma']) {
+    function mockActiveSession(
+      prisma: ReturnType<typeof buildService>['prisma'],
+    ) {
       (prisma.application.findUnique as jest.Mock).mockResolvedValue({
         id: 'app-1',
         interviewSession: { id: 'session-1', status: 'IN_PROGRESS' },
@@ -614,9 +636,7 @@ describe('InterviewSessionService', () => {
       mockActiveSession(prisma);
       (prisma.interviewViolation.groupBy as jest.Mock)
         .mockResolvedValueOnce([]) // prior summary: no warnings yet
-        .mockResolvedValueOnce([
-          { type: 'LOOKING_LEFT', _count: { _all: 1 } },
-        ]); // post-create summary
+        .mockResolvedValueOnce([{ type: 'LOOKING_LEFT', _count: { _all: 1 } }]); // post-create summary
 
       const result = await service.logViolation('app-1', 'LOOKING_LEFT', {
         direction: 'LEFT',
@@ -627,7 +647,11 @@ describe('InterviewSessionService', () => {
         data: {
           sessionId: 'session-1',
           type: 'LOOKING_LEFT',
-          metadataJson: { direction: 'LEFT', durationSeconds: 5, warningNumber: 1 },
+          metadataJson: {
+            direction: 'LEFT',
+            durationSeconds: 5,
+            warningNumber: 1,
+          },
         },
       });
       expect(result.total).toBe(1);
@@ -653,7 +677,10 @@ describe('InterviewSessionService', () => {
         { durationSeconds: 5 },
       );
 
-      expect(forceSubmit).toHaveBeenCalledWith('app-1', 'AUTO_SUBMITTED_VIOLATIONS');
+      expect(forceSubmit).toHaveBeenCalledWith(
+        'app-1',
+        'AUTO_SUBMITTED_VIOLATIONS',
+      );
       expect(result.forced).toBe(true);
       expect(result.total).toBe(8);
     });
