@@ -52,6 +52,17 @@
   --color-info-soft: var(--color-brand-50);
   --color-info-text: var(--color-brand-700);
 
+  /* Hero panel (landing + login) — deliberately NOT theme-flipping semantic
+     tokens; the gradient itself is the "brand panel", distinct from surface
+     colors, and gets its own light/dark treatment below. */
+  --color-hero-from: #1b3489;
+  --color-hero-via: #1d4ed8;
+  --color-hero-to: #7c3aed;
+  --color-hero-orb-teal: rgba(13, 148, 136, 0.38);
+  --color-hero-orb-violet: rgba(124, 58, 237, 0.35);
+  --color-hero-orb-blue: rgba(59, 111, 240, 0.32);
+  --color-hero-grid: rgba(255, 255, 255, 0.07);
+
   /* Dark theme (proctored interview call screen) */
   --color-dark-bg: #030712;
   --color-dark-surface: #111827;
@@ -129,6 +140,16 @@
   --color-danger-text: #fca5a5;
   --color-info-soft: var(--color-brand-50);
   --color-info-text: var(--color-brand-700);
+
+  /* Hero panel — near-black navy with saturated glow, not a pastel
+     inversion of the light-mode gradient. */
+  --color-hero-from: #05060d;
+  --color-hero-via: #0a1230;
+  --color-hero-to: #170b3d;
+  --color-hero-orb-teal: rgba(45, 212, 191, 0.28);
+  --color-hero-orb-violet: rgba(139, 92, 246, 0.4);
+  --color-hero-orb-blue: rgba(91, 139, 240, 0.38);
+  --color-hero-grid: rgba(255, 255, 255, 0.05);
 }
 
 @theme inline {
@@ -202,6 +223,14 @@
   --color-info-soft: var(--color-info-soft);
   --color-info-text: var(--color-info-text);
 
+  --color-hero-from: var(--color-hero-from);
+  --color-hero-via: var(--color-hero-via);
+  --color-hero-to: var(--color-hero-to);
+  --color-hero-orb-teal: var(--color-hero-orb-teal);
+  --color-hero-orb-violet: var(--color-hero-orb-violet);
+  --color-hero-orb-blue: var(--color-hero-orb-blue);
+  --color-hero-grid: var(--color-hero-grid);
+
   --radius-card: var(--radius-card);
   --radius-control: var(--radius-control);
 }
@@ -229,5 +258,52 @@ h4 {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* Hero panel background: base gradient + fine grid, theme-aware via the
+   --color-hero-* tokens above. Glow orbs are separate animated elements
+   (see HomePage/LoginPage) layered on top of this. */
+.hero-surface {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(
+    135deg,
+    var(--color-hero-from),
+    var(--color-hero-via) 55%,
+    var(--color-hero-to)
+  );
+}
+
+.hero-surface::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--color-hero-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-hero-grid) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(
+    ellipse 80% 60% at 50% 0%,
+    black 40%,
+    transparent 90%
+  );
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 40%, transparent 90%);
+  pointer-events: none;
+}
+
+@keyframes drift {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(3%, -4%) scale(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-surface [data-orb] {
+    animation: none !important;
   }
 }

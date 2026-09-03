@@ -31,7 +31,7 @@ export default function LoginPage() {
 
   return (
     <main className="grid min-h-screen grid-cols-1 md:grid-cols-2">
-      <div className="hidden flex-col justify-between bg-gradient-to-br from-brand-900 via-brand-700 to-accent-violet p-12 text-white md:flex">
+      <div className="hero-surface hidden flex-col justify-between p-12 text-white md:flex">
         <div className="flex items-center gap-2">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/15 text-sm font-bold">
             AI
