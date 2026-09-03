@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { motion } from "motion/react";
 import { Card } from "@/components/ui/Card";
 import { apiFetch, ApiError } from "@/lib/api";
 import { LoadingState, EmptyState, ErrorState } from "@/components/AsyncState";
@@ -59,6 +60,18 @@ const STEPS = [
   },
 ];
 
+const fadeUp = {
+  hidden: { opacity: 0, y: 16 },
+  show: { opacity: 1, y: 0 },
+};
+
+const staggerContainer = {
+  hidden: {},
+  show: {
+    transition: { staggerChildren: 0.1 },
+  },
+};
+
 function previewOf(candidateSummary: string): string {
   return candidateSummary.split(/\n{2,}/)[0]?.trim() ?? "";
 }
@@ -77,23 +90,36 @@ export default function HomePage() {
 
   return (
     <main className="flex flex-col">
-      <div className="relative overflow-hidden bg-gradient-to-br from-brand-900 via-brand-700 to-accent-violet">
-        <div
+      <div className="hero-surface flex min-h-[100svh] flex-col">
+        <motion.div
+          data-orb
           aria-hidden
-          className="pointer-events-none absolute -left-24 -top-24 h-80 w-80 rounded-full bg-accent-teal/40 blur-[100px]"
+          className="pointer-events-none absolute -left-24 -top-24 h-80 w-80 rounded-full blur-[100px]"
+          style={{ background: "var(--color-hero-orb-teal)", animation: "drift 16s ease-in-out infinite" }}
         />
-        <div
+        <motion.div
+          data-orb
           aria-hidden
-          className="pointer-events-none absolute -right-16 top-10 h-96 w-96 rounded-full bg-accent-violet/40 blur-[110px]"
+          className="pointer-events-none absolute -right-16 top-10 h-96 w-96 rounded-full blur-[110px]"
+          style={{
+            background: "var(--color-hero-orb-violet)",
+            animation: "drift 20s ease-in-out infinite reverse",
+          }}
         />
-        <div
+        <motion.div
+          data-orb
           aria-hidden
-          className="pointer-events-none absolute bottom-[-6rem] left-1/3 h-72 w-72 rounded-full bg-brand-400/30 blur-[100px]"
+          className="pointer-events-none absolute bottom-[-6rem] left-1/3 h-72 w-72 rounded-full blur-[100px]"
+          style={{
+            background: "var(--color-hero-orb-blue)",
+            animation: "drift 18s ease-in-out infinite",
+            animationDelay: "-4s",
+          }}
         />
 
         <header className="relative flex items-center justify-between px-6 py-5 md:px-12">
           <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-sm font-bold text-brand-700">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 text-sm font-bold text-white ring-1 ring-inset ring-white/25">
               AI
             </span>
             <span className="font-heading text-lg font-semibold text-white">
@@ -102,49 +128,83 @@ export default function HomePage() {
           </div>
           <Link
             href="/login"
-            className="rounded-[var(--radius-control)] border border-white/30 px-4 py-2 text-sm font-medium text-white hover:bg-white/10"
+            className="rounded-[var(--radius-control)] border border-white/30 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/10"
           >
             For Employers / Staff Login
           </Link>
         </header>
 
-        <section className="relative px-6 py-16 text-center md:px-12 md:py-24">
-          <span className="mx-auto inline-flex items-center rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-brand-100 ring-1 ring-inset ring-white/20">
+        <motion.section
+          className="relative flex flex-1 flex-col justify-center px-6 py-16 text-center md:px-12 md:py-24"
+          initial="hidden"
+          animate="show"
+          variants={staggerContainer}
+        >
+          <motion.span
+            variants={fadeUp}
+            transition={{ duration: 0.5, ease: "easeOut" }}
+            className="mx-auto inline-flex items-center rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white/85 ring-1 ring-inset ring-white/20"
+          >
             AI-powered hiring, end to end
-          </span>
-          <h1 className="mx-auto mt-5 max-w-2xl font-heading text-4xl font-semibold text-white text-balance md:text-5xl">
+          </motion.span>
+          <motion.h1
+            variants={fadeUp}
+            transition={{ duration: 0.5, ease: "easeOut" }}
+            className="mx-auto mt-5 max-w-2xl font-heading text-4xl font-semibold text-white text-balance md:text-5xl"
+          >
             The future of hiring is intelligent
-          </h1>
-          <p className="mx-auto mt-4 max-w-xl text-base text-brand-100">
+          </motion.h1>
+          <motion.p
+            variants={fadeUp}
+            transition={{ duration: 0.5, ease: "easeOut" }}
+            className="mx-auto mt-4 max-w-xl text-base text-white/75"
+          >
             Fast AI-driven screening, structured voice interviews, and a
             transparent process from application to offer.
-          </p>
-          <div className="mt-8 flex flex-wrap justify-center gap-3">
-            <a
+          </motion.p>
+          <motion.div
+            variants={fadeUp}
+            transition={{ duration: 0.5, ease: "easeOut" }}
+            className="mt-8 flex flex-wrap justify-center gap-3"
+          >
+            <motion.a
               href="#open-roles"
-              className="rounded-[var(--radius-control)] bg-white px-6 py-3 text-sm font-medium text-brand-700 shadow-lg shadow-brand-900/30 hover:bg-brand-50"
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.98 }}
+              className="rounded-[var(--radius-control)] bg-gradient-to-r from-accent-teal via-brand-500 to-accent-violet px-6 py-3 text-sm font-medium text-white shadow-lg shadow-brand-900/50 hover:brightness-110"
             >
               Browse Open Roles
-            </a>
-            <a
+            </motion.a>
+            <motion.a
               href="#how-it-works"
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.98 }}
               className="rounded-[var(--radius-control)] border border-white/30 px-6 py-3 text-sm font-medium text-white hover:bg-white/10"
             >
               See how it works
-            </a>
-          </div>
-        </section>
+            </motion.a>
+          </motion.div>
+        </motion.section>
       </div>
 
       <section id="how-it-works" className="bg-surface-card px-6 py-16 md:px-12">
         <h2 className="text-center font-heading text-2xl font-semibold text-text-primary">
           How it works
         </h2>
-        <div className="mx-auto mt-10 grid max-w-4xl gap-6 md:grid-cols-3">
+        <motion.div
+          className="mx-auto mt-10 grid max-w-4xl gap-6 md:grid-cols-3"
+          initial="hidden"
+          whileInView="show"
+          viewport={{ once: true, amount: 0.3 }}
+          variants={staggerContainer}
+        >
           {STEPS.map((step, index) => (
-            <div
+            <motion.div
               key={step.title}
-              className="relative flex flex-col gap-2 rounded-[var(--radius-card)] border border-border p-5 shadow-sm"
+              variants={fadeUp}
+              transition={{ duration: 0.45, ease: "easeOut" }}
+              whileHover={{ y: -3 }}
+              className="relative flex flex-col gap-2 rounded-[var(--radius-card)] border border-border bg-white/[0.03] p-5 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-md"
             >
               <span
                 className={`flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br ${step.accent} text-sm font-semibold text-white`}
@@ -155,9 +215,9 @@ export default function HomePage() {
                 {step.title}
               </h3>
               <p className="text-sm text-text-muted">{step.body}</p>
-            </div>
+            </motion.div>
           ))}
-        </div>
+        </motion.div>
       </section>
 
       <section id="open-roles" className="bg-surface px-6 py-16 md:px-12">
@@ -181,49 +241,57 @@ export default function HomePage() {
           </div>
         )}
 
-        <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <motion.div
+          className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3"
+          initial="hidden"
+          whileInView="show"
+          viewport={{ once: true, amount: 0.2 }}
+          variants={staggerContainer}
+        >
           {jobs?.map((job) => {
             const workModelStyle = job.workModel
               ? (WORK_MODEL_STYLES[job.workModel] ?? DEFAULT_WORK_MODEL_STYLE)
               : DEFAULT_WORK_MODEL_STYLE;
 
             return (
-              <Link key={job.id} href={`/jobs/${job.id}`}>
-                <Card className="relative h-full overflow-hidden transition-all hover:-translate-y-0.5 hover:shadow-md">
-                  <span
-                    className={`absolute inset-y-0 left-0 w-1 ${workModelStyle.bar}`}
-                    aria-hidden
-                  />
-                  <h3 className="font-heading text-lg font-semibold text-text-primary">
-                    {job.title}
-                  </h3>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {job.workModel && (
-                      <span
-                        className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${workModelStyle.badge}`}
-                      >
-                        {WORK_MODEL_LABELS[job.workModel] ?? job.workModel}
-                      </span>
+              <motion.div key={job.id} variants={fadeUp} transition={{ duration: 0.4, ease: "easeOut" }}>
+                <Link href={`/jobs/${job.id}`}>
+                  <Card className="relative h-full overflow-hidden transition-all hover:-translate-y-0.5 hover:shadow-md">
+                    <span
+                      className={`absolute inset-y-0 left-0 w-1 ${workModelStyle.bar}`}
+                      aria-hidden
+                    />
+                    <h3 className="font-heading text-lg font-semibold text-text-primary">
+                      {job.title}
+                    </h3>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {job.workModel && (
+                        <span
+                          className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${workModelStyle.badge}`}
+                        >
+                          {WORK_MODEL_LABELS[job.workModel] ?? job.workModel}
+                        </span>
+                      )}
+                      {job.location && (
+                        <span className="rounded-full bg-surface-muted px-2.5 py-0.5 text-xs font-medium text-text-secondary">
+                          {job.location}
+                        </span>
+                      )}
+                    </div>
+                    {job.candidateSummary && (
+                      <p className="mt-3 line-clamp-2 text-sm text-text-muted">
+                        {previewOf(job.candidateSummary)}
+                      </p>
                     )}
-                    {job.location && (
-                      <span className="rounded-full bg-surface-muted px-2.5 py-0.5 text-xs font-medium text-text-secondary">
-                        {job.location}
-                      </span>
-                    )}
-                  </div>
-                  {job.candidateSummary && (
-                    <p className="mt-3 line-clamp-2 text-sm text-text-muted">
-                      {previewOf(job.candidateSummary)}
-                    </p>
-                  )}
-                  <span className="mt-4 inline-block text-sm font-medium text-brand-700">
-                    View &amp; Apply →
-                  </span>
-                </Card>
-              </Link>
+                    <span className="mt-4 inline-block text-sm font-medium text-brand-700">
+                      View &amp; Apply →
+                    </span>
+                  </Card>
+                </Link>
+              </motion.div>
             );
           })}
-        </div>
+        </motion.div>
       </section>
 
       <footer className="border-t border-border px-6 py-8 text-center text-xs text-text-muted md:px-12">
